@@ -1,6 +1,6 @@
 FROM node:24.11.1-alpine AS deps
 RUN apk upgrade --no-cache && \
-    apk add --no-cache python3 make g++ gcc
+    apk add --no-cache python3 make g++ gcc git
 WORKDIR /app
 COPY package.json ./
 RUN npm i --omit=dev
