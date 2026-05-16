@@ -56,7 +56,6 @@
     "google-tts-api": "^2.0.2",
     "got": "^14.6.6",
     "goto": "^0.2.0",
-    "hmtai": "^3.2.3",
     "human-readable": "^0.2.1",
     "jimp": "^0.16.1",
     "moment-timezone": "^0.6.1",
