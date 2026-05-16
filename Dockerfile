@@ -3,7 +3,7 @@ RUN apk upgrade --no-cache && \
     apk add --no-cache python3 make g++ gcc git
 WORKDIR /app
 COPY package.json ./
-RUN npm i --omit=dev
+RUN npm i
 
 FROM node:24.11.1-alpine
 RUN apk upgrade --no-cache && \
