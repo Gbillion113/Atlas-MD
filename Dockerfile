@@ -2,8 +2,8 @@ FROM node:18-alpine AS deps
 RUN apk upgrade --no-cache && \
     apk add --no-cache python3 make g++ gcc git
 WORKDIR /app
-COPY package.json ./
-RUN npm i
+COPY package.json package-lock.json* ./
+RUN npm i --legacy-peer-deps
 
 FROM node:18-alpine
 RUN apk upgrade --no-cache && \
@@ -18,4 +18,4 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 EXPOSE 10000
-CMD ["pm2-runtime", "ecosystem.config.cjs"]
+CMD ["npm", "start"]
