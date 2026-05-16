@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+import got from "got";
 
 const sfwEndpoints = {
   waifu: "https://api.waifu.pics/sfw/waifu",
@@ -6,9 +6,6 @@ const sfwEndpoints = {
   shinobu: "https://api.waifu.pics/sfw/shinobu",
   megumin: "https://api.waifu.pics/sfw/megumin",
   bully: "https://api.waifu.pics/sfw/bully",
-  cuddle: "https://api.waifu.pics/sfw/cuddle",
-  cry: "https://api.waifu.pics/sfw/cry",
-  hug: "https://api.waifu.pics/sfw/hug",
   awoo: "https://api.waifu.pics/sfw/awoo",
   kiss: "https://api.waifu.pics/sfw/kiss",
   lick: "https://api.waifu.pics/sfw/lick",
@@ -34,8 +31,7 @@ export default {
     if (!url) return;
     await doReact("🌸");
     try {
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await got(url).json();
       await Atlas.sendMessage(m.from, {
         image: { url: data.url },
         caption: `🌸 *${inputCMD.toUpperCase()}*`,
