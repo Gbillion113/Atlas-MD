@@ -10,10 +10,9 @@ const nsfwCategories = {
   ecchi: "ecchi",
   ero: "ero",
   ass: "ass",
-  hass: "hass",
-  pgif: "pgif",
-  neko: "neko",
   blowjob: "blowjob",
+  nsfwneko: "neko",
+  pgif: "pgif",
 };
 
 export default {
@@ -21,12 +20,10 @@ export default {
   alias: Object.keys(nsfwCategories),
   uniquecommands: ["hentai", "milf", "oral", "paizuri", "ecchi", "ero", "ass", "blowjob"],
   description: "NSFW anime images",
-  start: async (Atlas, m, { inputCMD, doReact, isGroup }) => {
+  start: async (Atlas, m, { inputCMD, doReact }) => {
     await doReact("🔞");
-
     const category = nsfwCategories[inputCMD];
     if (!category) return;
-
     try {
       const data = await got(`https://api.waifu.pics/nsfw/${category}`, { headers }).json();
       const url = data.url;
@@ -43,8 +40,17 @@ export default {
           caption: `🔞 *${inputCMD.toUpperCase()}*`,
         }, { quoted: m });
       }
-    } catch (err) {
-      m.reply(`❌ Failed to fetch. Try again!`);
+    } catch {
+      try {
+        const data2 = await got(`https://nekos.best/api/v2/${category}`, { headers }).json();
+        const url2 = data2.results[0].url;
+        await Atlas.sendMessage(m.from, {
+          image: { url: url2 },
+          caption: `🔞 *${inputCMD.toUpperCase()}*`,
+        }, { quoted: m });
+      } catch (err2) {
+        m.reply(`❌ Failed to fetch. Try again!`);
+      }
     }
   },
 };
