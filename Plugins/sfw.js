@@ -1,34 +1,26 @@
-import got from "got";
+import HMtaiClass from "hmtai";
+const hmtai = new HMtaiClass();
 
-const BASE = "https://fantox-apis.vercel.app";
-const headers = { "User-Agent": "AtlasBot/1.0", "Accept": "application/json" };
-
-const sfwTags = {
-  waifu: "waifu",
-  maid: "maid",
-  uniform: "schooluniform",
-  oppai: "breasts",
-  selfies: "idol",
-  neko: "neko",
-  swimsuit: "swimsuit",
-  bikini: "bikini",
-  foxgirl: "foxgirl",
-  catgirl: "catgirl",
-  bunnygirl: "bunnygirl",
-  wolfgirl: "wolfgirl",
+const sfwCommands = {
+  waifu: () => hmtai.sfw.wallpaper(),
+  neko: () => hmtai.sfw.neko_arts(),
+  wolfgirl: () => hmtai.sfw.wolf_arts(),
+  coffee: () => hmtai.sfw.coffee_arts(),
+  wallpaper: () => hmtai.sfw.wallpaper(),
+  mobilewallpaper: () => hmtai.sfw.mobileWallpaper(),
+  jahy: () => hmtai.sfw.jahy_arts(),
 };
 
 export default {
   name: "sfw",
-  alias: Object.keys(sfwTags),
-  uniquecommands: ["waifu", "maid", "uniform", "neko", "swimsuit", "bikini", "foxgirl", "catgirl", "bunnygirl", "wolfgirl"],
+  alias: Object.keys(sfwCommands),
+  uniquecommands: ["waifu", "neko", "wolfgirl", "coffee", "wallpaper", "mobilewallpaper", "jahy"],
   description: "SFW anime images",
   start: async (Atlas, m, { inputCMD, doReact }) => {
-    if (!sfwTags[inputCMD]) return;
+    if (!sfwCommands[inputCMD]) return;
     await doReact("🌸");
     try {
-      const data = await got(`${BASE}/${sfwTags[inputCMD]}`, { headers }).json();
-      const url = data.url || data.image || data.link;
+      const url = await sfwCommands[inputCMD]();
       if (!url) return m.reply("❌ No image found!");
       await Atlas.sendMessage(m.from, {
         image: { url },
