@@ -1,43 +1,45 @@
 import got from "got";
 
-const sfwEndpoints = {
-  waifu: "https://api.waifu.pics/sfw/waifu",
-  neko: "https://api.waifu.pics/sfw/neko",
-  shinobu: "https://api.waifu.pics/sfw/shinobu",
-  megumin: "https://api.waifu.pics/sfw/megumin",
-  bully: "https://api.waifu.pics/sfw/bully",
-  awoo: "https://api.waifu.pics/sfw/awoo",
-  kiss: "https://api.waifu.pics/sfw/kiss",
-  lick: "https://api.waifu.pics/sfw/lick",
-  pat: "https://api.waifu.pics/sfw/pat",
-  smug: "https://api.waifu.pics/sfw/smug",
-  bonk: "https://api.waifu.pics/sfw/bonk",
-  blush: "https://api.waifu.pics/sfw/blush",
-  smile: "https://api.waifu.pics/sfw/smile",
-  wave: "https://api.waifu.pics/sfw/wave",
-  highfive: "https://api.waifu.pics/sfw/highfive",
-  nom: "https://api.waifu.pics/sfw/nom",
-  dance: "https://api.waifu.pics/sfw/dance",
-  happy: "https://api.waifu.pics/sfw/happy",
+const sfwCategories = {
+  waifu: "waifu",
+  neko: "neko",
+  shinobu: "shinobu",
+  megumin: "megumin",
+  awoo: "awoo",
+  kiss: "kiss",
+  pat: "pat",
+  smug: "smug",
+  bonk: "bonk",
+  blush: "blush",
+  smile: "smile",
+  wave: "wave",
+  nom: "nom",
+  dance: "dance",
+  happy: "happy",
+};
+
+const headers = {
+  "User-Agent": "AtlasBot/1.0 (WhatsApp Bot)",
 };
 
 export default {
   name: "sfw",
-  alias: Object.keys(sfwEndpoints),
+  alias: Object.keys(sfwCategories),
   uniquecommands: ["waifu", "neko", "shinobu", "megumin", "awoo", "dance", "happy"],
   description: "SFW anime images",
   start: async (Atlas, m, { inputCMD, doReact }) => {
-    const url = sfwEndpoints[inputCMD];
-    if (!url) return;
+    const category = sfwCategories[inputCMD];
+    if (!category) return;
     await doReact("🌸");
     try {
-      const data = await got(url).json();
+      const data = await got(`https://nekos.best/api/v2/${category}`, { headers }).json();
+      const url = data.results[0].url;
       await Atlas.sendMessage(m.from, {
-        image: { url: data.url },
+        image: { url },
         caption: `🌸 *${inputCMD.toUpperCase()}*`,
       }, { quoted: m });
     } catch (err) {
-      m.reply(`❌ Failed to fetch image: ${err.message}`);
+      m.reply(`❌ Failed: ${err.message}`);
     }
   },
 };
