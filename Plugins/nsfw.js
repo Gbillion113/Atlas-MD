@@ -1,42 +1,34 @@
-import got from "got";
+import HMtaiClass from "hmtai";
+const hmtai = new HMtaiClass();
 
-const BASE = "https://fantox-apis.vercel.app";
-const headers = { "User-Agent": "AtlasBot/1.0", "Accept": "application/json" };
-
-const nsfwTags = {
-  hentai: "sex",
-  hentai2: "sex2",
-  hentai3: "sex3",
-  milf: "milf",
-  ass: "ass",
-  pussy: "pussy",
-  spreadpussy: "spreadpussy",
-  nude: "nude",
-  nipples: "nipples",
-  uncensored: "uncensored",
-  topless: "topless",
-  cum: "cum",
-  yuri: "yuri",
-  bondage: "bondage",
-  fingering: "fingering",
-  paizuri: "breasthold",
-  nsfwneko: "neko",
-  nsfwmaid: "maid",
-  bunnygirl: "bunnygirl",
-  stockings: "stockings",
+const nsfwCommands = {
+  hentai: () => hmtai.nsfw.hentai(),
+  ass: () => hmtai.nsfw.ass(),
+  bdsm: () => hmtai.nsfw.bdsm(),
+  cum: () => hmtai.nsfw.cum(),
+  pussy: () => hmtai.nsfw.pussy(),
+  ahegao: () => hmtai.nsfw.ahegao(),
+  boobs: () => hmtai.nsfw.boobs(),
+  thighs: () => hmtai.nsfw.thighs(),
+  uniform: () => hmtai.nsfw.uniform(),
+  gangbang: () => hmtai.nsfw.gangbang(),
+  tentacles: () => hmtai.nsfw.tentacles(),
+  nsfwneko: () => hmtai.nsfw.nsfwNeko(),
+  yuri: () => hmtai.nsfw.yuri(),
+  nsfwgif: () => hmtai.nsfw.gif(),
+  zettai: () => hmtai.nsfw.zettaiRyouiki(),
 };
 
 export default {
   name: "nsfw",
-  alias: Object.keys(nsfwTags),
-  uniquecommands: ["hentai", "hentai2", "hentai3", "milf", "ass", "pussy", "nude", "nipples", "uncensored", "topless", "cum", "yuri", "bondage", "fingering", "paizuri"],
+  alias: Object.keys(nsfwCommands),
+  uniquecommands: ["hentai", "ass", "bdsm", "cum", "pussy", "ahegao", "boobs", "thighs", "uniform", "gangbang", "nsfwneko", "yuri"],
   description: "NSFW anime images",
   start: async (Atlas, m, { inputCMD, doReact }) => {
-    if (!nsfwTags[inputCMD]) return;
+    if (!nsfwCommands[inputCMD]) return;
     await doReact("🔞");
     try {
-      const data = await got(`${BASE}/${nsfwTags[inputCMD]}`, { headers }).json();
-      const url = data.url || data.image || data.link;
+      const url = await nsfwCommands[inputCMD]();
       if (!url) return m.reply("❌ No image found!");
       await Atlas.sendMessage(m.from, {
         image: { url },
