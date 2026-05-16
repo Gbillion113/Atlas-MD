@@ -1,8 +1,7 @@
 import fs from "fs";
 import eco from "discord-mongoose-economy";
-import { userData } from "../System/MongoDB/MongoDb_Schema.js";
 
-const ty = eco.connect(global.mongodb);
+eco.connect(global.mongodb);
 const cara = "cara";
 
 let mergedCommands = [
@@ -19,75 +18,156 @@ export default {
   ],
   description: "All Economy / Gambling related commands",
   start: async (Atlas, m, { pushName, prefix, inputCMD, doReact, text, args, mentionByTag }) => {
-    const debitCard = fs.readFileSync("./Assets/card.png");
-    const pushname = pushName || `${global.botName} User`;
-    let user, balance, value, k, a, twice, num, balance1, balance2, user1, user2;
+    let debitCard;
+    try { debitCard = fs.readFileSync("./Assets/card.png"); } catch { debitCard = null; }
+    const pushname = pushName || "User";
+    let user, balance, value, k, twice, num, balance1, balance2, user1, user2;
+
+    const sendImg = async (caption) => {
+      if (debitCard) {
+        await Atlas.sendMessage(m.from, { image: debitCard, caption }, { quoted: m });
+      } else {
+        await m.reply(caption);
+      }
+    };
 
     switch (inputCMD) {
       case "bank":
         await doReact("🏦");
         user = m.sender;
         balance = await eco.balance(user, cara);
-        var role = "brokie😭";
-        if (balance.bank <= 1000) role = "broke😭";
+        var role = "Brokie😭";
+        if (balance.bank <= 1000) role = "Broke😭";
         else if (balance.bank <= 10000) role = "Poor😢";
         else if (balance.bank <= 50000) role = "Average💸";
-        else if (balance.bank <= 1000000) role = "Rich💸💰";
+        else if (balance.bank <= 1000000) role = "Rich💰";
         else if (balance.bank <= 10000000) role = "Millionaire🤑";
-        else if (balance.bank <= 90000000) role = "Billionaire🤑🤑";
-        await Atlas.sendMessage(m.from, {
-          image: debitCard,
-          caption: `\n🏦 *${pushname}'s Bank*:\n\n🪙 Balance: ${balance.bank}/${balance.bankCapacity}\n\n\n*Wealth: ${role}*\n`,
-        }, { quoted: m });
+        else role = "Billionaire🤑🤑";
+        await sendImg(`\n🏦 *${pushname}'s Bank*\n\n🪙 Balance: ${balance.bank}/${balance.bankCapacity}\n\n*Wealth: ${role}*`);
+        break;
+
+      case "wallet":
+        await doReact("💲");
+        user = m.sender;
+        balance = await eco.balance(user, cara);
+        await sendImg(`\n💳 *${pushname}'s Wallet*\n\n💴 ${balance.wallet} coins`);
         break;
 
       case "daily":
         await doReact("📊");
-        if (!m.isGroup) return m.reply("This command can only be used in groups!");
         user = m.sender;
         const daily = await eco.daily(user, cara, 1000);
         if (daily.cd) {
-          await m.reply(`🧧 You already claimed your daily revenue today, Come back in ${daily.cdL} to claim again 🫡`);
+          await m.reply(`🧧 Already claimed today! Come back in *${daily.cdL}* 🫡`);
         } else {
-          await m.reply(`You have Successfully claimed your daily revenue ${daily.amount} 💴 today 🎉.`);
+          await m.reply(`🎉 You claimed your daily reward of *${daily.amount}* coins!`);
         }
         break;
 
       case "deposit":
         await doReact("💵");
-        if (!text) return m.reply(`Please provide an amount to deposit !\n\nExample: *${prefix}deposit 1000*`);
+        if (!text) return m.reply(`Please provide an amount!\n\nExample: *${prefix}deposit 1000*`);
         user = m.sender;
         num = parseInt(text);
+        if (isNaN(num)) return m.reply("Please provide a valid number!");
         const deposit = await eco.deposit(user, cara, num);
-        if (deposit.noten) return m.reply(`*Your Deposit amount should be less than or equal to your wallet balance!*`);
-        await Atlas.sendMessage(m.from, {
-          image: debitCard,
-          caption: `\n⛩️ Sender: ${m.pushName}\n\n🍀Successfully Deposited 💴 ${deposit.amount} to your bank.\n`,
-        }, { quoted: m });
+        if (deposit.noten) return m.reply(`*Your deposit amount exceeds your wallet balance!*`);
+        await sendImg(`✅ Successfully deposited *${deposit.amount}* coins to your bank!`);
+        break;
+
+      case "withdraw":
+        await doReact("💳");
+        if (!text) return m.reply(`Please provide an amount!\n\nExample: *${prefix}withdraw 1000*`);
+        user = m.sender;
+        const withdraw = await eco.withdraw(user, cara, text.trim());
+        if (withdraw.noten) return m.reply("*🏧 Insufficient funds in bank!*");
+        await eco.give(user, cara, parseInt(text.trim()));
+        await sendImg(`*🏧 ${withdraw.amount} coins* added to your wallet!`);
         break;
 
       case "gamble":
         await doReact("🎰");
         user = m.sender;
         if (!text) return m.reply(`Usage: *${prefix}gamble 100 left/right/up/down*`);
-        var texts = text.split(" ");
-        var opp = texts[1];
-        value = texts[0].toLowerCase();
-        var gg = parseInt(value);
+        var gTexts = text.split(" ");
+        var opp = gTexts[1];
+        var gg = parseInt(gTexts[0]);
+        if (isNaN(gg)) return m.reply("Please provide a valid amount!");
+        if (!opp) return m.reply("*Specify direction: left/right/up/down*");
+        if (gg < 50) return m.reply(`*Minimum gamble amount is 🪙50*`);
         balance = await eco.balance(user, cara);
+        if (balance.wallet < gg) return m.reply(`*You don't have enough coins!*`);
         twice = gg * 2;
         const directions = ["up", "right", "left", "down"];
         const r = directions[Math.floor(Math.random() * directions.length)];
-        if (!opp) return m.reply("*Specify the direction you are betting on!*");
-        if (balance.wallet < gg) return m.reply(`*You don't have sufficient 🪙 to gamble with*`);
-        if (gg < 50) return m.reply(`*Sorry, you can only gamble with more than 🪙50.*`);
-        if (r == opp) {
+        if (r === opp) {
           await eco.give(user, cara, twice);
-          await Atlas.sendMessage(m.from, { image: debitCard, caption: `*📈 You won 💴 ${twice}*` }, { quoted: m });
+          await sendImg(`*📈 You won 💴 ${twice} coins!*`);
         } else {
           await eco.deduct(user, cara, gg);
-          await m.reply(`*📉 You lost 💴 ${gg}*`);
+          await m.reply(`*📉 You lost 💴 ${gg} coins! The direction was ${r}*`);
         }
+        break;
+
+      case "slot":
+        await doReact("🎰");
+        user = m.sender;
+        balance1 = await eco.balance(user, cara);
+        if (balance1.wallet < 100) return m.reply(`You need at least 🪙100 to play slots!`);
+        const fruits = ["🍎", "🍇", "🥥", "🍍", "🍊"];
+        const s1 = fruits[Math.floor(Math.random() * fruits.length)];
+        const s2 = fruits[Math.floor(Math.random() * fruits.length)];
+        const s3 = fruits[Math.floor(Math.random() * fruits.length)];
+        if (s1 === s2 && s2 === s3) {
+          await eco.give(user, cara, 500);
+          m.reply(`🎰 [ ${s1} | ${s2} | ${s3} ]\n\n🎉 *JACKPOT! +🪙500*`);
+        } else if (s1 === s2 || s2 === s3 || s1 === s3) {
+          await eco.give(user, cara, 20);
+          m.reply(`🎰 [ ${s1} | ${s2} | ${s3} ]\n\n✅ *Small Win! +🪙20*`);
+        } else {
+          await eco.deduct(user, cara, 50);
+          m.reply(`🎰 [ ${s1} | ${s2} | ${s3} ]\n\n❌ *You Lost -🪙50*`);
+        }
+        break;
+
+      case "rob":
+        await doReact("💶");
+        if (!text && !m.quoted) return m.reply(`Please tag someone to rob!\n\nExample: *${prefix}rob @user*`);
+        var robTarget = m.quoted ? m.quoted.sender : (mentionByTag ? mentionByTag[0] : null);
+        if (!robTarget) return m.reply("Please tag someone to rob!");
+        user1 = m.sender;
+        user2 = robTarget;
+        balance1 = await eco.balance(user1, cara);
+        balance2 = await eco.balance(user2, cara);
+        if (balance1.wallet < 100) return m.reply(`*You need at least 🪙100 to attempt a robbery!*`);
+        if (balance2.wallet < 100) return m.reply(`*Your target is too broke to rob!*`);
+        const robAmount = Math.floor(Math.random() * 200) + 1;
+        const robChance = Math.random();
+        if (robChance < 0.33) {
+          return m.reply(`*😅 You chickened out!*`);
+        } else if (robChance < 0.66) {
+          await eco.deduct(user2, cara, robAmount);
+          await eco.give(user1, cara, robAmount);
+          return m.reply(`*🤑 You robbed and got away with 💴 ${robAmount} coins!*`);
+        } else {
+          await eco.deduct(user1, cara, 100);
+          return m.reply(`*☹️ You got caught and paid a fine of 💴 100 coins!*`);
+        }
+
+      case "transfer":
+        await doReact("💴");
+        if (!text) return m.reply(`Usage: *${prefix}transfer 100 @user*`);
+        var transTarget = m.quoted ? m.quoted.sender : (mentionByTag ? mentionByTag[0] : null);
+        if (!transTarget) return m.reply("Please tag someone to transfer to!");
+        user1 = m.sender;
+        user2 = transTarget;
+        const transAmount = parseInt(text.split(" ")[0]);
+        if (isNaN(transAmount)) return m.reply("Please provide a valid amount!");
+        balance = await eco.balance(user1, cara);
+        if (balance.wallet < transAmount) return m.reply("*You don't have enough coins!*");
+        await eco.deduct(user1, cara, transAmount);
+        await eco.give(user2, cara, transAmount);
+        await sendImg(`*📠 Successfully transferred ${transAmount} coins!*`);
         break;
 
       case "leaderboard":
@@ -95,103 +175,15 @@ export default {
         await doReact("📊");
         try {
           let h = await eco.lb("cara", 10);
-          if (h.length === 0) return Atlas.sendMessage(m.from, { text: "No users found on leaderboard." }, { quoted: m });
-          let str = `*[ ${global.botName} Leaderboard ]*\n\n`;
-          let arr = [];
+          if (!h || h.length === 0) return m.reply("No users on leaderboard yet!");
+          let str = `*💰 Economy Leaderboard 💰*\n\n`;
           for (let i = 0; i < h.length; i++) {
-            str += `*${i + 1}*\n╭─────────────◆\n│ *💳 Wallet:-* _${h[i].wallet}_\n│ *📄 Bank:-* _${h[i].bank}_\n╰─────────────◆\n\n`;
-            arr.push(h[i].userID);
+            str += `*${i + 1}.* Wallet: ${h[i].wallet} | Bank: ${h[i].bank}\n`;
           }
-          await Atlas.sendMessage(m.from, { text: str, mentions: arr }, { quoted: m });
+          await Atlas.sendMessage(m.from, { text: str }, { quoted: m });
         } catch (err) {
-          return Atlas.sendMessage(m.from, { text: `An error occurred while fetching the leaderboard.` }, { quoted: m });
+          return m.reply(`Error fetching leaderboard: ${err.message}`);
         }
-        break;
-
-      case "rob":
-        await doReact("💶");
-        if (!text) return m.reply(`Please specify the user you want to rob!\n\nExample: *${prefix}rob @user*`);
-        var mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
-        user1 = m.sender;
-        user2 = mentionedUser;
-        k = 100;
-        const amount = Math.floor(Math.random() * 200) + 1;
-        balance1 = await eco.balance(user1, cara);
-        balance2 = await eco.balance(user2, cara);
-        if (balance1.wallet < k) return m.reply(`*☹️ You don't have enough money to pay fine incase you get caught*`);
-        if (balance2.wallet < k) return m.reply(`*☹️ Your target doesn't have enough money to rob*`);
-        const robResult = Math.random();
-        if (robResult < 0.33) {
-          return m.reply(`*Lets leave this poor soul alone.*`);
-        } else if (robResult < 0.66) {
-          await eco.deduct(user2, cara, amount);
-          await eco.give(user1, cara, amount);
-          return m.reply(`*🤑 You robbed and got away with 💴 ${amount}*`);
-        } else {
-          await eco.deduct(user1, cara, balance1.wallet);
-          return m.reply(`*☹️ You got caught and paid a fine of 💴 ${balance1.wallet}*`);
-        }
-
-      case "slot":
-        await doReact("🎰");
-        user = m.sender;
-        balance1 = await eco.balance(user, cara);
-        if (balance1.wallet < 100) return m.reply(`You need at least 🪙100 in your wallet to play!`);
-        const fruits = ["🍎", "🍇", "🥥", "🍍"];
-        const f1 = fruits[Math.floor(Math.random() * fruits.length)];
-        const f2 = fruits[Math.floor(Math.random() * fruits.length)];
-        const f3 = fruits[Math.floor(Math.random() * fruits.length)];
-        if (f1 == f2 && f2 == f3) {
-          await eco.give(user, cara, 100);
-          m.reply(`🎰 ${f1}+${f2}+${f3}\n\n*Big Win --> 🪙100*`);
-        } else if (f1 == f2 || f2 == f3) {
-          await eco.give(user, cara, 20);
-          m.reply(`🎰 ${f1}-${f2}-${f3}\n\n*Small Win --> 🪙20*`);
-        } else {
-          await eco.deduct(user, cara, 50);
-          m.reply(`🎰 ${f1}-${f2}-${f3}\n\n*You Lost --> 🪙50*`);
-        }
-        break;
-
-      case "wallet":
-        await doReact("💲");
-        user = m.sender;
-        balance = await eco.balance(user, cara);
-        await Atlas.sendMessage(m.from, {
-          image: debitCard,
-          caption: `\n💳 *${m.pushName}'s Wallet:*\n\n_💴 ${balance.wallet}_`,
-        }, { quoted: m });
-        break;
-
-      case "withdraw":
-        await doReact("💳");
-        if (!text) return m.reply(`*Provide the amount you want to withdraw!*`);
-        user = m.sender;
-        const withdraw = await eco.withdraw(user, cara, text.trim());
-        if (withdraw.noten) return m.reply("*🏧 Insufficient fund in bank*");
-        await eco.give(user, cara, text.trim());
-        Atlas.sendMessage(m.from, {
-          image: debitCard,
-          caption: `*🏧 ALERT* _💶 ${withdraw.amount} has been added in your wallet._`,
-        }, { quoted: m });
-        break;
-
-      case "transfer":
-        await doReact("💴");
-        if (!text) return m.reply(`Use ${prefix}transfer 100 @user`);
-        var mentionedUser2 = m.quoted ? m.quoted.sender : mentionByTag[0];
-        user1 = m.sender;
-        user2 = mentionedUser2;
-        const transferAmount = parseInt(text.split(" ")[0]);
-        if (!transferAmount) return m.reply("Please provide a valid amount!");
-        balance = await eco.balance(user1, cara);
-        if (balance.wallet < transferAmount) return m.reply("You don't have sufficient money to transfer👎");
-        await eco.deduct(user1, cara, transferAmount);
-        await eco.give(user2, cara, transferAmount);
-        await Atlas.sendMessage(m.from, {
-          image: debitCard,
-          caption: `*📠 Transaction successful of ${transferAmount} 💷*`,
-        }, { quoted: m });
         break;
 
       default:
