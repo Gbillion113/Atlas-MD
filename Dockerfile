@@ -1,11 +1,11 @@
-FROM node:18-alpine AS deps
+FROM node:20-alpine AS deps
 RUN apk upgrade --no-cache && \
     apk add --no-cache python3 make g++ gcc git
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm i --legacy-peer-deps
 
-FROM node:18-alpine
+FROM node:20-alpine
 RUN apk upgrade --no-cache && \
     apk add --no-cache ffmpeg imagemagick python3 curl unzip bash && \
     npm install -g pm2 && \
