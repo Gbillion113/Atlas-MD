@@ -1,35 +1,34 @@
-import HMtaiClass from "hmtai";
-const hmtai = new HMtaiClass();
+import got from "got";
 
-const nsfwCommands = {
-  hentai: () => hmtai.nsfw.hentai(),
-  ass: () => hmtai.nsfw.ass(),
-  bdsm: () => hmtai.nsfw.bdsm(),
-  cum: () => hmtai.nsfw.cum(),
-  pussy: () => hmtai.nsfw.pussy(),
-  ahegao: () => hmtai.nsfw.ahegao(),
-  boobs: () => hmtai.nsfw.boobs(),
-  thighs: () => hmtai.nsfw.thighs(),
-  uniform: () => hmtai.nsfw.uniform(),
-  gangbang: () => hmtai.nsfw.gangbang(),
-  tentacles: () => hmtai.nsfw.tentacles(),
-  nsfwneko: () => hmtai.nsfw.nsfwNeko(),
-  yuri: () => hmtai.nsfw.yuri(),
-  nsfwgif: () => hmtai.nsfw.gif(),
-  zettai: () => hmtai.nsfw.zettaiRyouiki(),
+const headers = {
+  "User-Agent": "AtlasBot/1.0 (WhatsApp Group Bot)",
+  "Accept": "application/json"
+};
+
+const nsfwTags = {
+  hentai: "hentai",
+  milf: "milf",
+  ass: "ass",
+  ecchi: "ecchi",
+  ero: "ero",
+  nsfwneko: "neko",
+  nsfwwaifu: "waifu",
 };
 
 export default {
   name: "nsfw",
-  alias: Object.keys(nsfwCommands),
-  uniquecommands: ["hentai", "ass", "bdsm", "cum", "pussy", "ahegao", "boobs", "thighs", "uniform", "gangbang", "nsfwneko", "yuri"],
+  alias: Object.keys(nsfwTags),
+  uniquecommands: ["hentai", "milf", "ass", "ecchi", "ero", "nsfwneko", "nsfwwaifu"],
   description: "NSFW anime images",
   start: async (Atlas, m, { inputCMD, doReact }) => {
-    if (!nsfwCommands[inputCMD]) return;
+    if (!nsfwTags[inputCMD]) return;
     await doReact("🔞");
     try {
-      const url = await nsfwCommands[inputCMD]();
-      if (!url) return m.reply("❌ No image found!");
+      const data = await got(
+        `https://api.waifu.im/images?IncludedTags=${nsfwTags[inputCMD]}&IsNsfw=True`,
+        { headers }
+      ).json();
+      const url = data.items[0].url;
       await Atlas.sendMessage(m.from, {
         image: { url },
         caption: `🔞 *${inputCMD.toUpperCase()}*`,
