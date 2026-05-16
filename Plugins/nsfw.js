@@ -1,82 +1,49 @@
 import got from "got";
 
-const headers = {
-  "User-Agent": "AtlasBot/1.0 (WhatsApp Group Bot)",
-  "Accept": "application/json"
-};
+const BASE = "https://fantox-apis.vercel.app";
+const headers = { "User-Agent": "AtlasBot/1.0", "Accept": "application/json" };
 
-// waifu.im NSFW tags
 const nsfwTags = {
-  hentai: "hentai",
+  hentai: "sex",
+  hentai2: "sex2",
+  hentai3: "sex3",
   milf: "milf",
-  oral: "oral",
-  paizuri: "paizuri",
-  ecchi: "ecchi",
-  ero: "ero",
   ass: "ass",
-  hass: "ass",
+  pussy: "pussy",
+  spreadpussy: "spreadpussy",
+  nude: "nude",
+  nipples: "nipples",
+  uncensored: "uncensored",
+  topless: "topless",
+  cum: "cum",
+  yuri: "yuri",
+  bondage: "bondage",
+  fingering: "fingering",
+  paizuri: "breasthold",
   nsfwneko: "neko",
+  nsfwmaid: "maid",
+  bunnygirl: "bunnygirl",
+  stockings: "stockings",
 };
-
-// waifu.pics NSFW categories
-const waifuPicsTags = {
-  blowjob: "blowjob",
-  pgif: "pgif",
-  nsfwwaifu: "waifu",
-};
-
-const allNsfw = { ...nsfwTags, ...waifuPicsTags };
 
 export default {
   name: "nsfw",
-  alias: Object.keys(allNsfw),
-  uniquecommands: ["hentai", "milf", "oral", "paizuri", "ecchi", "ero", "ass", "blowjob", "nsfwneko", "pgif"],
+  alias: Object.keys(nsfwTags),
+  uniquecommands: ["hentai", "hentai2", "hentai3", "milf", "ass", "pussy", "nude", "nipples", "uncensored", "topless", "cum", "yuri", "bondage", "fingering", "paizuri"],
   description: "NSFW anime images",
   start: async (Atlas, m, { inputCMD, doReact }) => {
+    if (!nsfwTags[inputCMD]) return;
     await doReact("🔞");
-
-    // Try waifu.im for main NSFW tags
-    if (nsfwTags[inputCMD]) {
-      try {
-        const data = await got(
-          `https://api.waifu.im/search?included_tags=${nsfwTags[inputCMD]}&is_nsfw=true`,
-          { headers }
-        ).json();
-        const url = data.images[0].url;
-        await Atlas.sendMessage(m.from, {
-          image: { url },
-          caption: `🔞 *${inputCMD.toUpperCase()}*`,
-        }, { quoted: m });
-        return;
-      } catch {}
+    try {
+      const data = await got(`${BASE}/${nsfwTags[inputCMD]}`, { headers }).json();
+      const url = data.url || data.image || data.link;
+      if (!url) return m.reply("❌ No image found!");
+      await Atlas.sendMessage(m.from, {
+        image: { url },
+        caption: `🔞 *${inputCMD.toUpperCase()}*`,
+      }, { quoted: m });
+    } catch (err) {
+      m.reply(`❌ Failed: ${err.message}`);
     }
-
-    // Try waifu.pics for blowjob/pgif/waifu
-    if (waifuPicsTags[inputCMD]) {
-      try {
-        const category = waifuPicsTags[inputCMD];
-        const data = await got(
-          `https://api.waifu.pics/nsfw/${category}`,
-          { headers }
-        ).json();
-        const url = data.url;
-        const isGif = url.endsWith(".gif");
-        if (isGif) {
-          await Atlas.sendMessage(m.from, {
-            video: { url },
-            gifPlayback: true,
-            caption: `🔞 *${inputCMD.toUpperCase()}*`,
-          }, { quoted: m });
-        } else {
-          await Atlas.sendMessage(m.from, {
-            image: { url },
-            caption: `🔞 *${inputCMD.toUpperCase()}*`,
-          }, { quoted: m });
-        }
-        return;
-      } catch {}
-    }
-
-    m.reply(`❌ Failed to fetch. Try again!`);
   },
 };
