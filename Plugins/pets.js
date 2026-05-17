@@ -12,82 +12,176 @@ const petSchema = new mongoose.Schema({
 
 const Pet = mongoose.models.Pet || mongoose.model("Pet", petSchema);
 
-const petEmojis = { cat: "🐱", dog: "🐶", fox: "🦊", rabbit: "🐰", dragon: "🐉" };
+const petEmojis = {
+  cat: "🐱",
+  dog: "🐶",
+  fox: "🦊",
+  rabbit: "🐰",
+  dragon: "🐉",
+};
+
+const getPet = async (id) => {
+  let pet = await Pet.findOne({ id });
+  if (!pet) pet = await Pet.create({ id });
+  return pet;
+};
+
+const levelUp = (pet) => {
+  if (pet.xp >= 100) {
+    pet.level += 1;
+    pet.xp = pet.xp - 100;
+  }
+};
 
 export default {
   name: "pets",
   alias: ["pet", "petfeed", "petplay", "petname", "petadopt", "petstatus"],
   uniquecommands: ["pet", "petfeed", "petplay", "petname", "petadopt"],
   description: "Pet system",
+
   start: async (Atlas, m, { prefix, inputCMD, doReact, text }) => {
     const user = m.sender;
 
     switch (inputCMD) {
+
+      // ─── ADOPT + VIEW PET ─────────────────────────────
       case "petadopt":
       case "pet": {
+        await doReact("🐾");
+
         if (inputCMD === "petadopt") {
-          await doReact("🐾");
           const existing = await Pet.findOne({ id: user });
-          if (existing) return m.reply(`You already have a pet! Use *${prefix}pet* to see it.`);
+          if (existing) {
+            return m.reply(`You already have a pet! Use *${prefix}pet* to see it.`);
+          }
+
           const type = text?.toLowerCase();
           const valid = ["cat", "dog", "fox", "rabbit", "dragon"];
-          if (!type || !valid.includes(type)) return m.reply(`Choose a pet type!\n\nExample: *${prefix}petadopt cat*\n\nAvailable: cat, dog, fox, rabbit, dragon`);
+
+          if (!type || !valid.includes(type)) {
+            return m.reply(
+              `Choose a pet type!\n\nExample: *${prefix}petadopt cat*\n\nAvailable: cat, dog, fox, rabbit, dragon`
+            );
+          }
+
           await Pet.create({ id: user, type });
-          return m.reply(`🎉 You adopted a ${petEmojis[type]} *${type}*!\n\nName it with *${prefix}petname <name>*`);
+          return m.reply(
+            `🎉 You adopted a ${petEmojis[type]} *${type}*!\n\nName it with *${prefix}petname <name>*`
+          );
         }
-        await doReact("🐾");
-        const pet = await Pet.findOne({ id: user });
-        if (!pet) return m.reply(`You don't have a pet yet!\n\nAdopt one with *${prefix}petadopt cat/dog/fox/rabbit/dragon*`);
+
+        const pet = await getPet(user);
         const emoji = petEmojis[pet.type] || "🐾";
-        const hungerBar = "█".repeat(Math.floor(pet.hunger / 10)) + "░".repeat(10 - Math.floor(pet.hunger / 10));
-        const happyBar = "█".repeat(Math.floor(pet.happiness / 10)) + "░".repeat(10 - Math.floor(pet.happiness / 10));
-        m.reply(`${emoji} *${pet.name}*\n\n🐾 Type: ${pet.type}\n⭐ Level: ${pet.level}\n✨ XP: ${pet.xp}/100\n\n🍖 Hunger: [${hungerBar}] ${pet.hunger}%\n😊 Happiness: [${happyBar}] ${pet.happiness}%\n\nUse *${prefix}petfeed* to feed and *${prefix}petplay* to play!`);
+
+        const hungerBar =
+          "█".repeat(Math.floor(pet.hunger / 10)) +
+          "░".repeat(10 - Math.floor(pet.hunger / 10));
+
+        const happyBar =
+          "█".repeat(Math.floor(pet.happiness / 10)) +
+          "░".repeat(10 - Math.floor(pet.happiness / 10));
+
+        m.reply(
+          `${emoji} *${pet.name}*\n\n` +
+          `🐾 Type: ${pet.type}\n` +
+          `⭐ Level: ${pet.level}\n` +
+          `✨ XP: ${pet.xp}/100\n\n` +
+          `🍖 Hunger: [${hungerBar}] ${pet.hunger}%\n` +
+          `😊 Happiness: [${happyBar}] ${pet.happiness}%\n\n` +
+          `Use *${prefix}petfeed* to feed and *${prefix}petplay* to play!`
+        );
         break;
       }
 
-      case "petstatus":
+      // ─── STATUS ───────────────────────────────────────
+      case "petstatus": {
         await doReact("🐾");
-        const petS = await Pet.findOne({ id: user });
-        if (!petS) return m.reply(`You don't have a pet yet! Use *${prefix}petadopt*`);
-        const emojiS = petEmojis[petS.type] || "🐾";
-        m.reply(`${emojiS} *${petS.name}* Status\n\n🍖 Hunger: ${petS.hunger}%\n😊 Happiness: ${petS.happiness}%\n⭐ Level: ${petS.level}\n✨ XP: ${petS.xp}/100`);
-        break;
 
+        const pet = await getPet(user);
+        const emoji = petEmojis[pet.type] || "🐾";
+
+        m.reply(
+          `${emoji} *${pet.name}* Status\n\n` +
+          `🍖 Hunger: ${pet.hunger}%\n` +
+          `😊 Happiness: ${pet.happiness}%\n` +
+          `⭐ Level: ${pet.level}\n` +
+          `✨ XP: ${pet.xp}/100`
+        );
+        break;
+      }
+
+      // ─── FEED ─────────────────────────────────────────
       case "petfeed": {
         await doReact("🍖");
-        const pet = await Pet.findOne({ id: user });
-        if (!pet) return m.reply(`You don't have a pet! Use *${prefix}petadopt*`);
-        if (pet.hunger >= 100) return m.reply(`${petEmojis[pet.type]} *${pet.name}* is already full! 🍖`);
+
+        const pet = await getPet(user);
+
+        if (pet.hunger >= 100) {
+          return m.reply(`${petEmojis[pet.type]} *${pet.name}* is already full! 🍖`);
+        }
+
         pet.hunger = Math.min(100, pet.hunger + 30);
         pet.xp += 10;
-        if (pet.xp >= 100) { pet.level += 1; pet.xp = 0; }
+
+        levelUp(pet);
+
         await pet.save();
-        m.reply(`🍖 You fed *${pet.name}*!\n\nHunger: ${pet.hunger}%\n✨ XP: ${pet.xp}/100${pet.xp === 0 ? `\n\n🎉 *Level Up! Now Level ${pet.level}!*` : ""}`);
+
+        const leveled = pet.xp < 10; // after levelUp rollover
+
+        m.reply(
+          `🍖 You fed *${pet.name}*!\n\n` +
+          `Hunger: ${pet.hunger}%\n` +
+          `✨ XP: ${pet.xp}/100` +
+          (leveled ? `\n\n🎉 *Level Up! Now Level ${pet.level}!*` : "")
+        );
         break;
       }
 
+      // ─── PLAY ─────────────────────────────────────────
       case "petplay": {
         await doReact("🎾");
-        const pet = await Pet.findOne({ id: user });
-        if (!pet) return m.reply(`You don't have a pet! Use *${prefix}petadopt*`);
-        if (pet.happiness >= 100) return m.reply(`${petEmojis[pet.type]} *${pet.name}* is already super happy! 😊`);
+
+        const pet = await getPet(user);
+
+        if (pet.happiness >= 100) {
+          return m.reply(`${petEmojis[pet.type]} *${pet.name}* is already super happy! 😊`);
+        }
+
         pet.happiness = Math.min(100, pet.happiness + 25);
         pet.hunger = Math.max(0, pet.hunger - 10);
         pet.xp += 15;
-        if (pet.xp >= 100) { pet.level += 1; pet.xp = 0; }
+
+        levelUp(pet);
+
         await pet.save();
-        m.reply(`🎾 You played with *${pet.name}*!\n\nHappiness: ${pet.happiness}%\nHunger: ${pet.hunger}%\n✨ XP: ${pet.xp}/100${pet.xp === 0 ? `\n\n🎉 *Level Up! Now Level ${pet.level}!*` : ""}`);
+
+        const leveled = pet.xp < 15;
+
+        m.reply(
+          `🎾 You played with *${pet.name}*!\n\n` +
+          `Happiness: ${pet.happiness}%\n` +
+          `Hunger: ${pet.hunger}%\n` +
+          `✨ XP: ${pet.xp}/100` +
+          (leveled ? `\n\n🎉 *Level Up! Now Level ${pet.level}!*` : "")
+        );
         break;
       }
 
+      // ─── NAME ─────────────────────────────────────────
       case "petname": {
         await doReact("✏️");
-        if (!text) return m.reply(`Please provide a name!\n\nExample: *${prefix}petname Fluffy*`);
-        const pet = await Pet.findOne({ id: user });
-        if (!pet) return m.reply(`You don't have a pet! Use *${prefix}petadopt*`);
+
+        if (!text) {
+          return m.reply(`Please provide a name!\n\nExample: *${prefix}petname Fluffy*`);
+        }
+
+        const pet = await getPet(user);
         const oldName = pet.name;
+
         pet.name = text.trim();
         await pet.save();
+
         m.reply(`✅ Renamed *${oldName}* to *${pet.name}*! ${petEmojis[pet.type]}`);
         break;
       }
