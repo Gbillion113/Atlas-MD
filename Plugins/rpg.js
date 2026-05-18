@@ -1,32 +1,18 @@
 import fs from "fs";
 import mongoose from "mongoose";
-import eco from "discord-mongoose-economy";
-
-eco.connect(global.mongodb);
 
 const cooldowns = new Map();
-const COOLDOWN_TIME = 30000; // 30 seconds
+const COOLDOWN_TIME = 30000;
 
 const playerSchema = new mongoose.Schema({
-  id: {
-    type: String,
-    unique: true,
-    required: true,
-  },
-
-  name: {
-    type: String,
-    default: "Player",
-  },
-
+  id: { type: String, unique: true, required: true },
+  name: { type: String, default: "Player" },
   inventory: {
     wood: { type: Number, default: 0 },
     stone: { type: Number, default: 0 },
     iron: { type: Number, default: 0 },
     diamonds: { type: Number, default: 0 },
-
     goldenApple: { type: Number, default: 0 },
-
     diamondpickaxe: { type: Number, default: 0 },
     ironpickaxe: { type: Number, default: 0 },
     stonepickaxe: { type: Number, default: 0 },
@@ -34,274 +20,147 @@ const playerSchema = new mongoose.Schema({
   },
 });
 
-const player =
-  mongoose.models.Player || mongoose.model("Player", playerSchema);
+const player = mongoose.models.Player || mongoose.model("Player", playerSchema);
 
-const cara = "cara";
+const getEcoUser = async (id) => {
+  const EcoUser = mongoose.models.EcoUser;
+  if (!EcoUser) return null;
+  let user = await EcoUser.findOne({ id });
+  if (!user) user = await EcoUser.create({ id });
+  return user;
+};
 
-let mergedCommands = [
-  "buy",
-  "purchase",
-  "inventory",
-  "inv",
-  "mine",
-  "hunt",
-  "dig",
-  "chop",
-  "hunt2",
-  "reg-inv",
-  "register-inv",
-  "register",
-  "shop",
-  "store",
-  "sellitem",
-  "sellinv",
-];
+const rpgItems = {
+  woodenaxe: { cost: 250, field: "woodenaxe", name: "🪓 Wooden Axe" },
+  stonepickaxe: { cost: 500, field: "stonepickaxe", name: "⛏️ Stone Pickaxe" },
+  ironpickaxe: { cost: 2000, field: "ironpickaxe", name: "⛏️ Iron Pickaxe" },
+  diamondpickaxe: { cost: 5000, field: "diamondpickaxe", name: "💠 Diamond Pickaxe" },
+  goldenapple: { cost: 1000, field: "goldenApple", name: "🍎 Golden Apple" },
+};
+
+const rpgSellPrices = {
+  wood: 30,
+  stone: 50,
+  iron: 150,
+  diamonds: 500,
+  goldenApple: 5000,
+};
+
+const lootTables = {
+  woodenaxe: { wood: [8,4], stone: [2,2], iron: [1,1], diamonds: [0,1] },
+  stonepickaxe: { wood: [4,4], stone: [4,2], iron: [2,1], diamonds: [0,1] },
+  ironpickaxe: { wood: [1,1], stone: [4,2], iron: [4,1], diamonds: [2,2] },
+  diamondpickaxe: { wood: [0,1], stone: [4,2], iron: [4,1], diamonds: [7,3] },
+};
 
 export default {
-  name: "others",
-  alias: [...mergedCommands],
-
-  uniquecommands: [
-    "buy",
-    "inventory",
-    "mine",
-    "hunt",
-    "hunt2",
-    "register",
-    "shop",
-    "sellitem",
+  name: "rpg",
+  alias: [
+    "rpgbuy", "rpginv", "rpginventory", "mine", "hunt",
+    "chop", "hunt2", "register", "rpgshop", "sellitem", "sellinv",
   ],
-
-  description: "All miscellaneous commands",
-
-  start: async (
-    Atlas,
-    m,
-    { pushName, prefix, inputCMD, doReact, text, args }
-  ) => {
-    let pic = fs.readFileSync("./Assets/Atlas.jpg");
-
-    let user, inventory;
+  uniquecommands: [
+    "rpgbuy", "rpginventory", "mine", "hunt",
+    "hunt2", "register", "rpgshop", "sellitem",
+  ],
+  description: "RPG system - mine, hunt, sell items",
+  start: async (Atlas, m, { pushName, prefix, inputCMD, doReact, text, args }) => {
+    let pic;
+    try { pic = fs.readFileSync("./Assets/Atlas.jpg"); } catch {}
+    let user;
 
     switch (inputCMD) {
-      case "buy":
-      case "purchase":
+
+      case "register": {
+        await doReact("🔰");
+        user = await player.findOne({ id: m.sender });
+        if (user) return m.reply("⚠️ Already registered in RPG!");
+        await player.create({ id: m.sender, name: pushName || "Player" });
+        m.reply(`✅ Registered in RPG!\n\nNow buy a tool with *${prefix}rpgshop* and start mining with *${prefix}mine woodenaxe*`);
+        break;
+      }
+
+      case "rpgshop":
+      case "store": {
+        await doReact("🛒");
+        const list = Object.entries(rpgItems).map(([k,v]) => `▪️ *${v.name}* — $${v.cost}\n   Buy: *${prefix}rpgbuy ${k}*`).join("\n\n");
+        m.reply(`🛍️ *RPG Shop*\n\n${list}`);
+        break;
+      }
+
+      case "rpgbuy": {
         await doReact("💰");
-
         user = await player.findOne({ id: m.sender });
-
-        if (!user)
-          return m.reply(
-            `You have not registered in RPG yet!\n\nPlease register first by typing *${prefix}register*`
-          );
-
-        const balance = await eco.balance(m.sender, cara);
-
-        let item = text;
-
-        if (!item)
-          return m.reply(
-            `Please provide an item to buy!\n\nExample: *${prefix}buy woodenaxe*`
-          );
-
-        const items = {
-          woodenaxe: {
-            cost: 250,
-            field: "woodenaxe",
-            name: "Wooden Axe",
-          },
-
-          stonepickaxe: {
-            cost: 500,
-            field: "stonepickaxe",
-            name: "Stone Pickaxe",
-          },
-
-          ironpickaxe: {
-            cost: 2000,
-            field: "ironpickaxe",
-            name: "Iron Pickaxe",
-          },
-
-          diamondpickaxe: {
-            cost: 5000,
-            field: "diamondpickaxe",
-            name: "Diamond Pickaxe",
-          },
-
-          goldenapple: {
-            cost: 1000,
-            field: "goldenApple",
-            name: "Golden Apple",
-          },
-
-          gold: {
-            cost: 1000,
-            field: "goldenApple",
-            name: "Golden Apple",
-          },
-        };
-
-        const selectedItem = items[item.toLowerCase()];
-
-        if (!selectedItem)
-          return m.reply(
-            `😕 Invalid item. Please use ${prefix}shop to see available items.`
-          );
-
-        if (balance.wallet < selectedItem.cost)
-          return m.reply(
-            `You don't have enough money!\n\nYou need *${selectedItem.cost}* coins to buy *${selectedItem.name}*!`
-          );
-
-        await eco.deduct(m.sender, cara, selectedItem.cost);
-
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+        if (!text) return m.reply(`Usage: *${prefix}rpgbuy <item>*\n\nSee items: *${prefix}rpgshop*`);
+        const selectedItem = rpgItems[text.toLowerCase().trim()];
+        if (!selectedItem) return m.reply(`❌ Invalid item! See *${prefix}rpgshop*`);
+        const ecoUser = await getEcoUser(m.sender);
+        if (!ecoUser) return m.reply("❌ Economy not available!");
+        if (ecoUser.wallet < selectedItem.cost) return m.reply(`❌ Need $${selectedItem.cost}! You have $${ecoUser.wallet}`);
+        await mongoose.models.EcoUser.findOneAndUpdate({ id: m.sender }, { wallet: ecoUser.wallet - selectedItem.cost });
         user.inventory[selectedItem.field] += 1;
-
         await user.save();
-
-        m.reply(
-          `✅ You have successfully bought *1* ${selectedItem.name}!`
-        );
-
+        m.reply(`✅ Bought *${selectedItem.name}* for *$${selectedItem.cost}*!\n💰 Wallet: $${ecoUser.wallet - selectedItem.cost}`);
         break;
+      }
 
-      case "inventory":
-      case "inv":
+      case "rpginv":
+      case "rpginventory": {
         await doReact("🎒");
-
         user = await player.findOne({ id: m.sender });
-
-        if (!user)
-          return m.reply(
-            "You don't have any items yet. Use *register* to get started."
-          );
-
-        inventory = user.inventory;
-
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+        const inv = user.inventory;
         m.reply(
-          `[🐺 INVENTORY 🐺]
-
-🍎 Golden Apple: ${inventory.goldenApple}
-
-🔥 Wood: ${inventory.wood}
-🔮 Stone: ${inventory.stone}
-⚒ Iron: ${inventory.iron}
-💎 Diamonds: ${inventory.diamonds}
-
-🔨 TOOLS 🔨
-
-🪓 Wooden Axe: ${inventory.woodenaxe}
-⛏ Stone Pickaxe: ${inventory.stonepickaxe}
-⛏ Iron Pickaxe: ${inventory.ironpickaxe}
-💠 Diamond Pickaxe: ${inventory.diamondpickaxe}`
+          `[🐺 RPG INVENTORY 🐺]\n\n` +
+          `🍎 Golden Apple: ${inv.goldenApple}\n\n` +
+          `🔥 Wood: ${inv.wood}\n` +
+          `🔮 Stone: ${inv.stone}\n` +
+          `⚒️ Iron: ${inv.iron}\n` +
+          `💎 Diamonds: ${inv.diamonds}\n\n` +
+          `🔨 *TOOLS*\n` +
+          `🪓 Wooden Axe: ${inv.woodenaxe}\n` +
+          `⛏️ Stone Pickaxe: ${inv.stonepickaxe}\n` +
+          `⛏️ Iron Pickaxe: ${inv.ironpickaxe}\n` +
+          `💠 Diamond Pickaxe: ${inv.diamondpickaxe}\n\n` +
+          `Sell items: *${prefix}sellitem <item> [amount]*`
         );
-
         break;
+      }
 
       case "mine":
       case "hunt":
-      case "dig":
-      case "chop":
-        await doReact("⛏");
-
+      case "chop": {
+        await doReact("⛏️");
         user = await player.findOne({ id: m.sender });
-
-        if (!user)
-          return m.reply(
-            `You have not registered in RPG yet!\n\nPlease register first by typing *${prefix}register*`
-          );
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
 
         const lastUsed = cooldowns.get(m.sender);
-
         if (lastUsed && Date.now() - lastUsed < COOLDOWN_TIME) {
-          const timeLeft = Math.ceil(
-            (COOLDOWN_TIME - (Date.now() - lastUsed)) / 1000
-          );
+          const timeLeft = Math.ceil((COOLDOWN_TIME - (Date.now() - lastUsed)) / 1000);
+          return m.reply(`⏳ Wait *${timeLeft}s* before mining again.`);
+        }
 
+        const axeUsed = args[0]?.toLowerCase();
+        if (!axeUsed) {
           return m.reply(
-            `⏳ Please wait *${timeLeft}s* before mining again.`
+            `⛏️ *Choose a tool:*\n\n` +
+            `1. *${prefix}mine woodenaxe*\n` +
+            `2. *${prefix}mine stonepickaxe*\n` +
+            `3. *${prefix}mine ironpickaxe*\n` +
+            `4. *${prefix}mine diamondpickaxe*`
           );
         }
 
-        const axeUsed = args[0];
-
-        if (!axeUsed)
-          return m.reply(
-            `[ 🐺 GO MINE 🐺 ]
-
-Choose a tool:
-
-1. *${prefix}mine woodenaxe*
-2. *${prefix}mine stonepickaxe*
-3. *${prefix}mine ironpickaxe*
-4. *${prefix}mine diamondpickaxe*`
-          );
-
-        const validTools = [
-          "woodenaxe",
-          "stonepickaxe",
-          "ironpickaxe",
-          "diamondpickaxe",
-        ];
-
-        if (!validTools.includes(axeUsed))
-          return m.reply(`❌ Invalid tool specified.`);
-
-        if (!user.inventory[axeUsed] || user.inventory[axeUsed] < 1)
-          return m.reply(
-            `❌ You don't own a ${axeUsed}.\nBuy one with *${prefix}buy ${axeUsed}*`
-          );
-
-        const lootTables = {
-          woodenaxe: {
-            wood: [8, 4],
-            stone: [2, 2],
-            iron: [1, 1],
-            diamonds: [0, 1],
-          },
-
-          stonepickaxe: {
-            wood: [4, 4],
-            stone: [4, 2],
-            iron: [2, 1],
-            diamonds: [0, 1],
-          },
-
-          ironpickaxe: {
-            wood: [1, 1],
-            stone: [4, 2],
-            iron: [4, 1],
-            diamonds: [2, 2],
-          },
-
-          diamondpickaxe: {
-            wood: [0, 1],
-            stone: [4, 2],
-            iron: [4, 1],
-            diamonds: [7, 3],
-          },
-        };
+        if (!lootTables[axeUsed]) return m.reply(`❌ Invalid tool! Use woodenaxe, stonepickaxe, ironpickaxe or diamondpickaxe`);
+        if (!user.inventory[axeUsed] || user.inventory[axeUsed] < 1) return m.reply(`❌ You don't have a ${axeUsed}!\nBuy one with *${prefix}rpgbuy ${axeUsed}*`);
 
         const table = lootTables[axeUsed];
-
         const loot = {
-          wood:
-            Math.floor(Math.random() * table.wood[1]) +
-            table.wood[0],
-
-          stone:
-            Math.floor(Math.random() * table.stone[1]) +
-            table.stone[0],
-
-          iron:
-            Math.floor(Math.random() * table.iron[1]) +
-            table.iron[0],
-
-          diamonds:
-            Math.floor(Math.random() * table.diamonds[1]) +
-            table.diamonds[0],
+          wood: Math.floor(Math.random() * table.wood[1]) + table.wood[0],
+          stone: Math.floor(Math.random() * table.stone[1]) + table.stone[0],
+          iron: Math.floor(Math.random() * table.iron[1]) + table.iron[0],
+          diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
         };
 
         user.inventory.wood += loot.wood;
@@ -309,162 +168,70 @@ Choose a tool:
         user.inventory.iron += loot.iron;
         user.inventory.diamonds += loot.diamonds;
 
-        let lootMsg = `[ 🐺 MINE RESULT 🐺 ]
+        let lootMsg = `⛏️ *MINE RESULT*\n\nTool: ${axeUsed}\n\n🔥 Wood: +${loot.wood}\n🔮 Stone: +${loot.stone}\n⚒️ Iron: +${loot.iron}\n💎 Diamonds: +${loot.diamonds}`;
 
-⛏ Tool Used: ${axeUsed}
-
-🔥 Wood: ${loot.wood}
-🔮 Stone: ${loot.stone}
-⚒ Iron: ${loot.iron}
-💎 Diamonds: ${loot.diamonds}`;
-
-        if (
-          axeUsed === "diamondpickaxe" &&
-          Math.random() <= 0.05
-        ) {
+        if (axeUsed === "diamondpickaxe" && Math.random() <= 0.05) {
           user.inventory.goldenApple += 1;
-
-          lootMsg += `
-
-🍎 BONUS:
-You found a *Golden Apple!*`;
+          lootMsg += `\n\n🍎 *BONUS: Found a Golden Apple!*`;
         }
 
         cooldowns.set(m.sender, Date.now());
+        await user.save();
+        m.reply(lootMsg + `\n\nSell items with *${prefix}sellitem <item>*`);
+        break;
+      }
+
+      case "hunt2": {
+        await doReact("⚔️");
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+
+        const axe = args[0]?.toLowerCase();
+        if (!axe || !lootTables[axe]) return m.reply(`Usage: *${prefix}hunt2 <tool>*`);
+        if (!user.inventory[axe] || user.inventory[axe] < 1) return m.reply(`❌ You don't have a ${axe}!`);
+
+        const table = lootTables[axe];
+        const loot = {
+          wood: Math.floor(Math.random() * table.wood[1]) + table.wood[0],
+          stone: Math.floor(Math.random() * table.stone[1]) + table.stone[0],
+          iron: Math.floor(Math.random() * table.iron[1]) + table.iron[0],
+          diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
+        };
+
+        user.inventory[axe] -= 1;
+        user.inventory.wood += loot.wood;
+        user.inventory.stone += loot.stone;
+        user.inventory.iron += loot.iron;
+        user.inventory.diamonds += loot.diamonds;
 
         await user.save();
-
-        m.reply(lootMsg);
-
+        m.reply(`⚔️ *HUNT RESULT*\n\nTool: ${axe} (consumed)\n\n🔥 Wood: +${loot.wood}\n🔮 Stone: +${loot.stone}\n⚒️ Iron: +${loot.iron}\n💎 Diamonds: +${loot.diamonds}`);
         break;
-
-      case "reg-inv":
-      case "register-inv":
-      case "register":
-        await doReact("🔰");
-
-        user = await player.findOne({ id: m.sender });
-
-        if (!user) {
-          await player.create({
-            id: m.sender,
-            name: pushName || "Player",
-          });
-
-          m.reply(`✅ You have successfully registered in RPG!`);
-        } else {
-          m.reply(`⚠️ You are already registered in RPG!`);
-        }
-
-        break;
-
-      case "shop":
-      case "store":
-        await doReact("🛒");
-
-        m.reply(
-          `🛍️ 💎 ${global.botName} STORE 💎 🛍️
-
-#1 🪓 Wooden Axe
-💰 250 coins
-📌 ${prefix}buy woodenaxe
-
-#2 ⛏ Stone Pickaxe
-💰 500 coins
-📌 ${prefix}buy stonepickaxe
-
-#3 ⛏ Iron Pickaxe
-💰 2000 coins
-📌 ${prefix}buy ironpickaxe
-
-#4 💠 Diamond Pickaxe
-💰 5000 coins
-📌 ${prefix}buy diamondpickaxe
-
-#5 🍎 Golden Apple
-💰 1000 coins
-📌 ${prefix}buy goldenapple`
-        );
-
-        break;
+      }
 
       case "sellitem":
       case "sellinv": {
         await doReact("💰");
-
-        const rpgSellPrices = {
-          wood: 30,
-          stone: 50,
-          iron: 150,
-          diamonds: 500,
-          goldenApple: 5000,
-        };
-
         if (!text) {
-          const prices = Object.entries(rpgSellPrices)
-            .map(([k, v]) => `${k}: $${v}`)
-            .join("\n");
-
-          return m.reply(
-            `💰 *RPG Sell Prices:*\n\n${prices}\n\nUsage: *${prefix}sellitem <item> [amount]*`
-          );
+          const prices = Object.entries(rpgSellPrices).map(([k,v]) => `${k}: $${v}`).join("\n");
+          return m.reply(`💰 *RPG Sell Prices:*\n\n${prices}\n\nUsage: *${prefix}sellitem <item> [amount]*`);
         }
-
         const parts = text.split(" ");
-
         const itemName = parts[0].toLowerCase();
-
         const amount = parseInt(parts[1]) || 1;
-
         user = await player.findOne({ id: m.sender });
-
-        if (!user)
-          return m.reply(
-            `Register first with *${prefix}register*`
-          );
-
-        if (!rpgSellPrices[itemName])
-          return m.reply(`❌ Can't sell that item!`);
-
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+        if (!rpgSellPrices[itemName]) return m.reply(`❌ Can't sell that! Valid items: ${Object.keys(rpgSellPrices).join(", ")}`);
         const owned = user.inventory[itemName] || 0;
-
-        if (owned < amount)
-          return m.reply(
-            `❌ You only have ${owned}x ${itemName}!`
-          );
-
+        if (owned < amount) return m.reply(`❌ You only have ${owned}x ${itemName}!`);
         const earnings = rpgSellPrices[itemName] * amount;
-
         user.inventory[itemName] -= amount;
-
         await user.save();
-
-        const EcoUser = mongoose.models.EcoUser;
-
-        if (EcoUser) {
-          const ecoUser = await EcoUser.findOne({
-            id: m.sender,
-          });
-
-          if (ecoUser) {
-            await EcoUser.findOneAndUpdate(
-              { id: m.sender },
-              {
-                wallet: ecoUser.wallet + earnings,
-              }
-            );
-          } else {
-            await EcoUser.create({
-              id: m.sender,
-              wallet: earnings,
-            });
-          }
+        const ecoUser = await getEcoUser(m.sender);
+        if (ecoUser) {
+          await mongoose.models.EcoUser.findOneAndUpdate({ id: m.sender }, { wallet: ecoUser.wallet + earnings });
         }
-
-        m.reply(
-          `✅ Sold *${amount}x ${itemName}* for *$${earnings}*!\n\nCheck your wallet with *${prefix}wallet*`
-        );
-
+        m.reply(`✅ Sold *${amount}x ${itemName}* for *$${earnings}*!\n💰 Wallet: $${ecoUser ? ecoUser.wallet + earnings : "N/A"}`);
         break;
       }
 
