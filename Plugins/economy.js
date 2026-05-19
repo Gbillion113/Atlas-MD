@@ -1,10 +1,7 @@
 import mongoose from "mongoose";
 import fs from "fs";
 
-// Money Wars hooks (golden apple daily bonus + rob shield)
-import { applyDailyBonus, checkGoldenAppleShield } from "./moneywars.js";
-
-// ─── SCHEMA ─────────────────────────────────────────────
+// ─── SCHEMA ─────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   wallet: { type: Number, default: 0 },
@@ -58,7 +55,7 @@ const sendImg = async (Atlas, m, caption) => {
   }
 };
 
-// ─── SHOP ITEMS ─────────────────────────────────────────
+// ─── SHOP ITEMS ─────────────────────────────────────────────
 const shopItems = {
   fishingrod: { name: "🎣 Fishing Rod", price: 500, description: "Catch more fish" },
   pickaxe: { name: "⛏️ Pickaxe", price: 800, description: "Dig for better loot" },
@@ -132,7 +129,7 @@ export default {
         break;
       }
 
-      // ─── DAILY — PATCHED with Money Wars tier + Golden Apple ──────────
+      // ─── DAILY ────────────────────────────────────────────
       case "daily": {
         await doReact("📅");
         if (cooldown(user.lastDaily, 24 * 60)) {
@@ -143,20 +140,9 @@ export default {
         const isStreak = lastDate && (now - lastDate) < 48 * 60 * 60 * 1000;
         const streak = isStreak ? user.streak + 1 : 1;
         const bonus = Math.min(streak * 100, 1000);
-        const baseAmount = 1000 + bonus;
-
-        // ✅ MONEY WARS HOOK: apply tier multiplier + golden apple buff
-        const { amount, appleNote, mult } = await applyDailyBonus(sender, baseAmount);
-
+        const amount = 1000 + bonus;
         await User.findOneAndUpdate({ id: sender }, { wallet: user.wallet + amount, lastDaily: now, streak });
-        m.reply(
-          `🎉 *Daily Claimed!*\n\n` +
-          `💰 +$${formatNum(amount)}\n` +
-          `🔥 Streak: ${streak} day(s)\n` +
-          `⭐ Streak Bonus: +$${bonus}` +
-          (mult > 1 ? `\n🎖️ Tier multiplier: ×${mult}` : "") +
-          appleNote
-        );
+        m.reply(`🎉 *Daily Claimed!*\n\n💰 +$${formatNum(amount)}\n🔥 Streak: ${streak} day(s)\n⭐ Streak Bonus: +$${bonus}`);
         break;
       }
 
@@ -286,19 +272,13 @@ export default {
         break;
       }
 
-      // ─── ROB — PATCHED with Golden Apple shield check ─────────────────
+      // ─── ROB ──────────────────────────────────────────────
       case "rob": {
         await doReact("🦹");
         const target = m.quoted ? m.quoted.sender : mentionByTag?.[0];
         if (!target) return m.reply(`Usage: *${prefix}rob @user*`);
         if (target === sender) return m.reply("❌ You can't rob yourself!");
         const targetUser = await getUser(target);
-
-        // ✅ MONEY WARS HOOK: check golden apple shield FIRST
-        const blocked = await checkGoldenAppleShield(target, sender, Atlas, m);
-        if (blocked) break;
-
-        // Original shield item check
         const hasShield = targetUser.inventory?.shield > 0;
         if (hasShield) {
           targetUser.inventory.shield -= 1;
@@ -448,7 +428,7 @@ export default {
       case "shop": {
         await doReact("🛍️");
         const list = Object.entries(shopItems).map(([k,v]) => `▪️ *${v.name}* — $${formatNum(v.price)}\n   ${v.description}\n   Buy: *${prefix}buy ${k}*`).join("\n\n");
-        m.reply(`🛍️ *Economy Shop*\n\n${list}\n\n🍎 *Golden Apple* — $5,000\n   Doubles daily + 3-turn rob shield\n   Buy: *${prefix}golden buy*`);
+        m.reply(`🛍️ *Economy Shop*\n\n${list}`);
         break;
       }
 
@@ -458,7 +438,7 @@ export default {
         if (!text) return m.reply(`Usage: *${prefix}buy <item>*\n\nSee items: *${prefix}shop*`);
         const itemKey = text.toLowerCase().trim();
         const item = shopItems[itemKey];
-        if (!item) return m.reply(`❌ Item not found! See *${prefix}shop*\n\n💡 For Golden Apple use: *${prefix}golden buy*`);
+        if (!item) return m.reply(`❌ Item not found! See *${prefix}shop*`);
         if (user.wallet < item.price) return m.reply(`❌ Need $${formatNum(item.price)}! You have $${formatNum(user.wallet)}`);
         const newInventory = { ...user.inventory, [itemKey]: (user.inventory?.[itemKey] || 0) + 1 };
         await User.findOneAndUpdate({ id: sender }, { wallet: user.wallet - item.price, inventory: newInventory });
@@ -489,7 +469,6 @@ export default {
         for (let i = 0; i < top.length; i++) {
           str += `*${i+1}.* ${top[i].id.split("@")[0]}\n   💰 $${formatNum(top[i].wallet + top[i].bank)}\n`;
         }
-        str += `\n👑 Premium leaderboard: \`-richlist\``;
         m.reply(str);
         break;
       }
