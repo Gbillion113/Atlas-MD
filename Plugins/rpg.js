@@ -31,26 +31,35 @@ const getEcoUser = async (id) => {
 };
 
 const rpgItems = {
-  woodenaxe: { cost: 250, field: "woodenaxe", name: "🪓 Wooden Axe" },
-  stonepickaxe: { cost: 500, field: "stonepickaxe", name: "⛏️ Stone Pickaxe" },
-  ironpickaxe: { cost: 2000, field: "ironpickaxe", name: "⛏️ Iron Pickaxe" },
-  diamondpickaxe: { cost: 5000, field: "diamondpickaxe", name: "💠 Diamond Pickaxe" },
-  goldenapple: { cost: 1000, field: "goldenApple", name: "🍎 Golden Apple" },
+  woodenaxe:     { cost: 250,  field: "woodenaxe",     name: "🪓 Wooden Axe"      },
+  stonepickaxe:  { cost: 500,  field: "stonepickaxe",  name: "⛏️ Stone Pickaxe"   },
+  ironpickaxe:   { cost: 2000, field: "ironpickaxe",   name: "⛏️ Iron Pickaxe"    },
+  diamondpickaxe:{ cost: 5000, field: "diamondpickaxe",name: "💠 Diamond Pickaxe" },
+  goldenapple:   { cost: 1000, field: "goldenApple",   name: "🍎 Golden Apple"    },
 };
 
 const rpgSellPrices = {
-  wood: 30,
-  stone: 50,
-  iron: 150,
-  diamonds: 500,
-  goldenApple: 5000,
+  wood:        30,
+  stone:       50,
+  iron:        150,
+  diamonds:    500,
+  goldenapple: 5000,  // ✅ FIX: lowercase key to match user input after .toLowerCase()
+};
+
+// ✅ FIX: maps any user-typed variant to the actual inventory field name
+const inventoryFieldMap = {
+  wood:        "wood",
+  stone:       "stone",
+  iron:        "iron",
+  diamonds:    "diamonds",
+  goldenapple: "goldenApple",  // user types "goldenapple", inventory stores "goldenApple"
 };
 
 const lootTables = {
-  woodenaxe: { wood: [8,4], stone: [2,2], iron: [1,1], diamonds: [0,1] },
-  stonepickaxe: { wood: [4,4], stone: [4,2], iron: [2,1], diamonds: [0,1] },
-  ironpickaxe: { wood: [1,1], stone: [4,2], iron: [4,1], diamonds: [2,2] },
-  diamondpickaxe: { wood: [0,1], stone: [4,2], iron: [4,1], diamonds: [7,3] },
+  woodenaxe:     { wood: [8,4], stone: [2,2], iron: [1,1], diamonds: [0,1] },
+  stonepickaxe:  { wood: [4,4], stone: [4,2], iron: [2,1], diamonds: [0,1] },
+  ironpickaxe:   { wood: [1,1], stone: [4,2], iron: [4,1], diamonds: [2,2] },
+  diamondpickaxe:{ wood: [0,1], stone: [4,2], iron: [4,1], diamonds: [7,3] },
 };
 
 export default {
@@ -123,7 +132,8 @@ export default {
           `⛏️ Stone Pickaxe: ${inv.stonepickaxe}\n` +
           `⛏️ Iron Pickaxe: ${inv.ironpickaxe}\n` +
           `💠 Diamond Pickaxe: ${inv.diamondpickaxe}\n\n` +
-          `Sell items: *${prefix}sellitem <item> [amount]*`
+          `Sell items: *${prefix}sellitem <item> [amount]*\n` +
+          `_e.g. ${prefix}sellitem goldenapple 1_`
         );
         break;
       }
@@ -157,22 +167,27 @@ export default {
 
         const table = lootTables[axeUsed];
         const loot = {
-          wood: Math.floor(Math.random() * table.wood[1]) + table.wood[0],
-          stone: Math.floor(Math.random() * table.stone[1]) + table.stone[0],
-          iron: Math.floor(Math.random() * table.iron[1]) + table.iron[0],
+          wood:     Math.floor(Math.random() * table.wood[1])     + table.wood[0],
+          stone:    Math.floor(Math.random() * table.stone[1])    + table.stone[0],
+          iron:     Math.floor(Math.random() * table.iron[1])     + table.iron[0],
           diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
         };
 
-        user.inventory.wood += loot.wood;
-        user.inventory.stone += loot.stone;
-        user.inventory.iron += loot.iron;
+        user.inventory.wood     += loot.wood;
+        user.inventory.stone    += loot.stone;
+        user.inventory.iron     += loot.iron;
         user.inventory.diamonds += loot.diamonds;
 
-        let lootMsg = `⛏️ *MINE RESULT*\n\nTool: ${axeUsed}\n\n🔥 Wood: +${loot.wood}\n🔮 Stone: +${loot.stone}\n⚒️ Iron: +${loot.iron}\n💎 Diamonds: +${loot.diamonds}`;
+        let lootMsg =
+          `⛏️ *MINE RESULT*\n\nTool: ${axeUsed}\n\n` +
+          `🔥 Wood: +${loot.wood}\n` +
+          `🔮 Stone: +${loot.stone}\n` +
+          `⚒️ Iron: +${loot.iron}\n` +
+          `💎 Diamonds: +${loot.diamonds}`;
 
         if (axeUsed === "diamondpickaxe" && Math.random() <= 0.05) {
           user.inventory.goldenApple += 1;
-          lootMsg += `\n\n🍎 *BONUS: Found a Golden Apple!*`;
+          lootMsg += `\n\n🍎 *BONUS: Found a Golden Apple!*\nSell it with *${prefix}sellitem goldenapple*`;
         }
 
         cooldowns.set(m.sender, Date.now());
@@ -192,46 +207,78 @@ export default {
 
         const table = lootTables[axe];
         const loot = {
-          wood: Math.floor(Math.random() * table.wood[1]) + table.wood[0],
-          stone: Math.floor(Math.random() * table.stone[1]) + table.stone[0],
-          iron: Math.floor(Math.random() * table.iron[1]) + table.iron[0],
+          wood:     Math.floor(Math.random() * table.wood[1])     + table.wood[0],
+          stone:    Math.floor(Math.random() * table.stone[1])    + table.stone[0],
+          iron:     Math.floor(Math.random() * table.iron[1])     + table.iron[0],
           diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
         };
 
-        user.inventory[axe] -= 1;
-        user.inventory.wood += loot.wood;
-        user.inventory.stone += loot.stone;
-        user.inventory.iron += loot.iron;
+        user.inventory[axe]     -= 1;
+        user.inventory.wood     += loot.wood;
+        user.inventory.stone    += loot.stone;
+        user.inventory.iron     += loot.iron;
         user.inventory.diamonds += loot.diamonds;
 
         await user.save();
-        m.reply(`⚔️ *HUNT RESULT*\n\nTool: ${axe} (consumed)\n\n🔥 Wood: +${loot.wood}\n🔮 Stone: +${loot.stone}\n⚒️ Iron: +${loot.iron}\n💎 Diamonds: +${loot.diamonds}`);
+        m.reply(
+          `⚔️ *HUNT RESULT*\n\nTool: ${axe} (consumed)\n\n` +
+          `🔥 Wood: +${loot.wood}\n` +
+          `🔮 Stone: +${loot.stone}\n` +
+          `⚒️ Iron: +${loot.iron}\n` +
+          `💎 Diamonds: +${loot.diamonds}`
+        );
         break;
       }
 
+      // ✅ FIXED sellitem — golden apple now sells correctly
       case "sellitem":
       case "sellinv": {
         await doReact("💰");
         if (!text) {
-          const prices = Object.entries(rpgSellPrices).map(([k,v]) => `${k}: $${v}`).join("\n");
+          const prices = Object.entries(rpgSellPrices)
+            .map(([k,v]) => `${k}: $${v}`)
+            .join("\n");
           return m.reply(`💰 *RPG Sell Prices:*\n\n${prices}\n\nUsage: *${prefix}sellitem <item> [amount]*`);
         }
-        const parts = text.split(" ");
-        const itemName = parts[0].toLowerCase();
-        const amount = parseInt(parts[1]) || 1;
+
+        const parts    = text.split(" ");
+        const itemKey  = parts[0].toLowerCase();   // e.g. "goldenapple"
+        const amount   = parseInt(parts[1]) || 1;
+
+        // ✅ FIX: check sell price using lowercase key
+        if (!rpgSellPrices[itemKey]) {
+          return m.reply(
+            `❌ Can't sell that! Valid items:\n${Object.keys(rpgSellPrices).join(", ")}`
+          );
+        }
+
         user = await player.findOne({ id: m.sender });
         if (!user) return m.reply(`Register first with *${prefix}register*`);
-        if (!rpgSellPrices[itemName]) return m.reply(`❌ Can't sell that! Valid items: ${Object.keys(rpgSellPrices).join(", ")}`);
-        const owned = user.inventory[itemName] || 0;
-        if (owned < amount) return m.reply(`❌ You only have ${owned}x ${itemName}!`);
-        const earnings = rpgSellPrices[itemName] * amount;
-        user.inventory[itemName] -= amount;
+
+        // ✅ FIX: translate "goldenapple" → "goldenApple" for inventory lookup
+        const invField = inventoryFieldMap[itemKey] || itemKey;
+        const owned    = user.inventory[invField] || 0;
+
+        if (owned < amount) {
+          return m.reply(`❌ You only have ${owned}x ${itemKey}!`);
+        }
+
+        const earnings = rpgSellPrices[itemKey] * amount;
+        user.inventory[invField] -= amount;
         await user.save();
+
         const ecoUser = await getEcoUser(m.sender);
         if (ecoUser) {
-          await mongoose.models.EcoUser.findOneAndUpdate({ id: m.sender }, { wallet: ecoUser.wallet + earnings });
+          await mongoose.models.EcoUser.findOneAndUpdate(
+            { id: m.sender },
+            { wallet: ecoUser.wallet + earnings }
+          );
         }
-        m.reply(`✅ Sold *${amount}x ${itemName}* for *$${earnings}*!\n💰 Wallet: $${ecoUser ? ecoUser.wallet + earnings : "N/A"}`);
+
+        m.reply(
+          `✅ Sold *${amount}x ${itemKey}* for *$${earnings}*!\n` +
+          `💰 Wallet: $${ecoUser ? ecoUser.wallet + earnings : "N/A"}`
+        );
         break;
       }
 
