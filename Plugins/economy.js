@@ -501,8 +501,7 @@ export default {
         m.reply(`💼 ${job} *$${formatNum(amount)}*!${hasLaptop ? "\n💻 Laptop bonus applied!" : ""}\n💰 Wallet: $${formatNum(user.wallet + amount)}`);
         break;
       }
-
-      // ─── SELL ───────────────────────────────────────────
+   // ─── SELL ───────────────────────────────────────────
       case "sell": {
         await doReact("💰");
         if (!text) {
