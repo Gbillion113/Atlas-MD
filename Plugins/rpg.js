@@ -35,7 +35,7 @@ const rpgItems = {
   stonepickaxe:  { cost: 500,  field: "stonepickaxe",  name: "⛏️ Stone Pickaxe"   },
   ironpickaxe:   { cost: 2000, field: "ironpickaxe",   name: "⛏️ Iron Pickaxe"    },
   diamondpickaxe:{ cost: 5000, field: "diamondpickaxe",name: "💠 Diamond Pickaxe" },
-  goldenapple:   { cost: 1000, field: "goldenApple",   name: "🍎 Golden Apple"    },
+  goldenapple:   { cost: 10000, field: "goldenApple",   name: "🍎 Golden Apple"    },
 };
 
 const rpgSellPrices = {
