@@ -1,569 +1,283 @@
-/**
- * ╔══════════════════════════════════════════════════════════╗
- * ║        💰 MONEY WARS — Atlas MD Extension Plugin        ║
- * ║  Adds: tiers · golden apple · heist · stocks · premium  ║
- * ╠══════════════════════════════════════════════════════════╣
- * ║  SAFE TO USE ALONGSIDE economy.js — no command clashes  ║
- * ║  Uses the SAME EcoUser model (extended via patch)        ║
- * ╚══════════════════════════════════════════════════════════╝
- *
- * NEW COMMANDS (none clash with economy.js):
- *   -mw          → Money Wars info / help
- *   -tier        → View your tier & benefits
- *   -richlist    → Premium leaderboard with tier badges
- *   -setpremium  → [Owner] Set a player's tier
- *   -resetseason → [Owner] End season, crown winner
- *   -mwapple     → Buy/use a Money Wars Golden Apple buff
- *   -heist       → Start a group bank heist (Gold+)
- *   -joinheist   → Join an active heist (Gold+)
- *   -stocks      → View the stock market
- *   -buystock    → Buy shares (Gold+)
- *   -sellstock   → Sell shares (Gold+)
- *   -portfolio   → View your stock holdings
- */
-
+import fs from "fs";
 import mongoose from "mongoose";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ECOUSER MODEL
-// Defined here so moneywars.js works regardless of plugin load order.
-// Mongoose deduplicates — whichever plugin loads first registers it,
-// the second just retrieves it. No conflict with economy.js.
-// ─────────────────────────────────────────────────────────────────────────────
+const cooldowns = new Map();
+const COOLDOWN_TIME = 30000;
 
-const EcoUserSchema = new mongoose.Schema({
-  id:           { type: String, required: true, unique: true },
-  wallet:       { type: Number, default: 0 },
-  bank:         { type: Number, default: 1000 },
-  bankCapacity: { type: Number, default: 50000 },
-  lastDaily:    { type: Date,   default: null },
-  lastFish:     { type: Date,   default: null },
-  lastDig:      { type: Date,   default: null },
-  lastBeg:      { type: Date,   default: null },
-  lastWork:     { type: Date,   default: null },
-  streak:       { type: Number, default: 0 },
-  inventory:    { type: Object, default: {} },
-});
-const EcoUser = mongoose.models.EcoUser || mongoose.model("EcoUser", EcoUserSchema);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MWUSER MODEL
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MWUserSchema = new mongoose.Schema({
-  id:                { type: String, unique: true },
-  tier:              { type: String,  default: "free"  },
-  tierExpiry:        { type: Date,    default: null     },
-  goldenAppleBuff:   { type: Boolean, default: false    },
-  goldenAppleShield: { type: Number,  default: 0        },
-  seasonEarned:      { type: Number,  default: 0        },
+const playerSchema = new mongoose.Schema({
+  id: { type: String, unique: true, required: true },
+  name: { type: String, default: "Player" },
+  inventory: {
+    wood: { type: Number, default: 0 },
+    stone: { type: Number, default: 0 },
+    iron: { type: Number, default: 0 },
+    diamonds: { type: Number, default: 0 },
+    goldenApple: { type: Number, default: 0 },
+    diamondpickaxe: { type: Number, default: 0 },
+    ironpickaxe: { type: Number, default: 0 },
+    stonepickaxe: { type: Number, default: 0 },
+    woodenaxe: { type: Number, default: 0 },
+  },
 });
 
-const HeistSchema = new mongoose.Schema({
-  groupId:   { type: String, unique: true },
-  leader:    String,
-  members:   [String],
-  startTime: { type: Number, default: () => Date.now() },
-  active:    { type: Boolean, default: false },
-});
+const player = mongoose.models.Player || mongoose.model("Player", playerSchema);
 
-const StockSchema = new mongoose.Schema({
-  symbol:     { type: String, unique: true },
-  name:       String,
-  price:      Number,
-  change:     { type: Number, default: 0 },
-  history:    [Number],
-  lastUpdate: Number,
-});
-
-const PortfolioSchema = new mongoose.Schema({
-  id:     String,
-  symbol: String,
-  shares: { type: Number, default: 0 },
-  avgBuy: { type: Number, default: 0 },
-});
-
-const MWUser      = mongoose.models.MWUser      || mongoose.model("MWUser",      MWUserSchema);
-const MWHeist     = mongoose.models.MWHeist     || mongoose.model("MWHeist",     HeistSchema);
-const MWStock     = mongoose.models.MWStock     || mongoose.model("MWStock",     StockSchema);
-const MWPortfolio = mongoose.models.MWPortfolio || mongoose.model("MWPortfolio", PortfolioSchema);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-const TIERS = {
-  free:    { label: "🥉 Free",    badge: "",    dailyMult: 1, startBonus: 0,       monthlyNGN: 0     },
-  silver:  { label: "🥈 Silver",  badge: "🥈",  dailyMult: 1, startBonus: 10_000,  monthlyNGN: 500   },
-  gold:    { label: "🥇 Gold",    badge: "🥇",  dailyMult: 2, startBonus: 50_000,  monthlyNGN: 1_000 },
-  diamond: { label: "💎 Diamond", badge: "💎",  dailyMult: 3, startBonus: 200_000, monthlyNGN: 2_500 },
+const getEcoUser = async (id) => {
+  const EcoUser = mongoose.models.EcoUser;
+  if (!EcoUser) return null;
+  let user = await EcoUser.findOne({ id });
+  if (!user) user = await EcoUser.create({ id });
+  return user;
 };
 
-const TIER_GATES = {
-  heist:     "gold",
-  joinheist: "gold",
-  buystock:  "gold",
-  sellstock: "gold",
+const rpgItems = {
+  woodenaxe:     { cost: 250,  field: "woodenaxe",     name: "🪓 Wooden Axe"      },
+  stonepickaxe:  { cost: 500,  field: "stonepickaxe",  name: "⛏️ Stone Pickaxe"   },
+  ironpickaxe:   { cost: 2000, field: "ironpickaxe",   name: "⛏️ Iron Pickaxe"    },
+  diamondpickaxe:{ cost: 5000, field: "diamondpickaxe",name: "💠 Diamond Pickaxe" },
+  goldenapple:   { cost: 1000, field: "goldenApple",   name: "🍎 Golden Apple"    },
 };
 
-const GOLDEN_APPLE_PRICE = 5_000;
-
-const INITIAL_STOCKS = [
-  { symbol: "NAIJ", name: "NaijaBank Corp",    price: 1_200 },
-  { symbol: "KRYP", name: "KryptoCoin Ltd",     price: 8_500 },
-  { symbol: "AGRO", name: "AgroFirst Holdings", price: 450   },
-  { symbol: "TECH", name: "TechLagos Inc",      price: 3_200 },
-  { symbol: "FUEL", name: "PetroNG Resources",  price: 920   },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-const fmt = (n) => {
-  if (n >= 1e9) return `$${(n/1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n/1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `$${(n/1e3).toFixed(1)}K`;
-  return `$${n}`;
+const rpgSellPrices = {
+  wood:        30,
+  stone:       50,
+  iron:        150,
+  diamonds:    500,
+  goldenapple: 5000,  // ✅ FIX: lowercase key to match user input after .toLowerCase()
 };
 
-const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const tierLevel = (t) => ["free","silver","gold","diamond"].indexOf(t ?? "free");
+// ✅ FIX: maps any user-typed variant to the actual inventory field name
+const inventoryFieldMap = {
+  wood:        "wood",
+  stone:       "stone",
+  iron:        "iron",
+  diamonds:    "diamonds",
+  goldenapple: "goldenApple",  // user types "goldenapple", inventory stores "goldenApple"
+};
 
-async function getMWUser(id) {
-  let u = await MWUser.findOne({ id });
-  if (!u) u = await MWUser.create({ id });
-  if (u.tier !== "free" && u.tierExpiry && new Date() > u.tierExpiry) {
-    u.tier = "free";
-    u.tierExpiry = null;
-    await u.save();
-  }
-  return u;
-}
-
-async function getWallet(id) {
-  const eco = await EcoUser.findOne({ id });
-  return eco?.wallet ?? 0;
-}
-
-async function deductWallet(id, amount) {
-  await EcoUser.findOneAndUpdate({ id }, { $inc: { wallet: -amount } });
-}
-
-async function addWallet(id, amount) {
-  await EcoUser.findOneAndUpdate({ id }, { $inc: { wallet: amount } });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STOCK MARKET SETUP
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function seedStocks() {
-  for (const s of INITIAL_STOCKS) {
-    if (!await MWStock.findOne({ symbol: s.symbol })) {
-      await MWStock.create({ ...s, history: [s.price], lastUpdate: Date.now() });
-    }
-  }
-}
-
-async function tickStocks() {
-  for (const stock of await MWStock.find()) {
-    const pct      = parseFloat((Math.random() * 20 - 10).toFixed(2));
-    const newPrice = Math.max(10, Math.round(stock.price * (1 + pct / 100)));
-    stock.change     = pct;
-    stock.price      = newPrice;
-    stock.history    = [...stock.history.slice(-9), newPrice];
-    stock.lastUpdate = Date.now();
-    await stock.save();
-  }
-}
-
-seedStocks().catch(() => {});
-setInterval(() => tickStocks().catch(() => {}), 30 * 60 * 1000);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HEIST EXECUTION
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function executeHeist(groupId, Atlas, m) {
-  const heist = await MWHeist.findOne({ groupId, active: true });
-  if (!heist) return;
-  heist.active = false;
-  await heist.save();
-
-  if (heist.members.length < 2) {
-    return Atlas.sendMessage(m.from, {
-      text: "🏦 *Heist cancelled!* Need at least 2 crew members. Vault Keys not refunded (lesson learned 😅)"
-    });
-  }
-
-  const vault      = rand(20_000, 100_000);
-  const successPct = Math.min(0.8, 0.3 + heist.members.length * 0.1);
-  const success    = Math.random() < successPct;
-
-  if (!success) {
-    const fine = rand(500, 2_000);
-    for (const id of heist.members) await deductWallet(id, fine);
-    return Atlas.sendMessage(m.from, {
-      text:
-        `🚔 *HEIST BUSTED!*\n` +
-        `The cops were waiting... everyone pays *${fmt(fine)}* in fines.\n` +
-        `Crew: ${heist.members.length} people. Better plan next time! 😭`
-    });
-  }
-
-  const share = Math.floor(vault / heist.members.length);
-  for (const id of heist.members) {
-    await addWallet(id, share);
-    const mwu = await getMWUser(id);
-    mwu.seasonEarned += share;
-    await mwu.save();
-  }
-
-  Atlas.sendMessage(m.from, {
-    text:
-      `💰 *HEIST SUCCESSFUL!* 🎉\n` +
-      `${"═".repeat(22)}\n` +
-      `🏦 Vault looted: ${fmt(vault)}\n` +
-      `👥 Crew: ${heist.members.length} members\n` +
-      `💵 Each member gets: *${fmt(share)}*\n` +
-      `${"═".repeat(22)}\n` +
-      `Wallets updated!`
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PLUGIN EXPORT
-// ─────────────────────────────────────────────────────────────────────────────
+const lootTables = {
+  woodenaxe:     { wood: [8,4], stone: [2,2], iron: [1,1], diamonds: [0,1] },
+  stonepickaxe:  { wood: [4,4], stone: [4,2], iron: [2,1], diamonds: [0,1] },
+  ironpickaxe:   { wood: [1,1], stone: [4,2], iron: [4,1], diamonds: [2,2] },
+  diamondpickaxe:{ wood: [0,1], stone: [4,2], iron: [4,1], diamonds: [7,3] },
+};
 
 export default {
-  name: "moneywars",
+  name: "rpg",
   alias: [
-    "mw", "tier", "mytier", "richlist", "rl",
-    "setpremium", "resetseason",
-    "mwapple",
-    "heist", "joinheist",
-    "stocks", "buystock", "sellstock", "portfolio",
+    "rpgbuy", "rpginv", "rpginventory", "mine", "hunt",
+    "chop", "hunt2", "register", "rpgshop", "sellitem", "sellinv",
   ],
   uniquecommands: [
-    "mw", "tier", "richlist",
-    "setpremium", "resetseason",
-    "mwapple",
-    "heist", "joinheist",
-    "stocks", "buystock", "sellstock", "portfolio",
+    "rpgbuy", "rpginventory", "mine", "hunt",
+    "hunt2", "register", "rpgshop", "sellitem",
   ],
-  description: "💰 Money Wars — Tiers, Heist, Stocks & Golden Apple",
-
-  // ✅ uses isCreator not isOwner — matches Core.js
-  start: async (Atlas, m, { prefix, inputCMD, text, args, mentionByTag, pushName, isCreator }) => {
-    const sender = m.sender;
+  description: "RPG system - mine, hunt, sell items",
+  start: async (Atlas, m, { pushName, prefix, inputCMD, doReact, text, args }) => {
+    let pic;
+    try { pic = fs.readFileSync("./Assets/Atlas.jpg"); } catch {}
+    let user;
 
     switch (inputCMD) {
 
-      case "mw": {
-        await m.reply(
-          `💰 *MONEY WARS*\n${"═".repeat(24)}\n\n` +
-          `🥉 *Free*   → play & earn for free\n` +
-          `🥈 *Silver* → ₦500/mo — ×1 daily\n` +
-          `🥇 *Gold*   → ₦1,000/mo — ×2 daily, rob, heist, stocks\n` +
-          `💎 *Diamond*→ ₦2,500/mo — ×3 daily, exclusive board\n\n` +
-          `*Commands:*\n` +
-          `▪️ \`${prefix}tier\` — your tier & benefits\n` +
-          `▪️ \`${prefix}richlist\` — top players with badges\n` +
-          `▪️ \`${prefix}mwapple\` — buy MW Golden Apple buff\n` +
-          `▪️ \`${prefix}heist\` — group bank heist (Gold+)\n` +
-          `▪️ \`${prefix}stocks\` — stock market\n` +
-          `▪️ \`${prefix}buystock <SYM> <qty>\` — buy shares\n` +
-          `▪️ \`${prefix}sellstock <SYM> <qty>\` — sell shares\n` +
-          `▪️ \`${prefix}portfolio\` — your holdings\n\n` +
-          `_Pay via Opay/Palmpay → send proof → owner upgrades you_`
-        );
+      case "register": {
+        await doReact("🔰");
+        user = await player.findOne({ id: m.sender });
+        if (user) return m.reply("⚠️ Already registered in RPG!");
+        await player.create({ id: m.sender, name: pushName || "Player" });
+        m.reply(`✅ Registered in RPG!\n\nNow buy a tool with *${prefix}rpgshop* and start mining with *${prefix}mine woodenaxe*`);
         break;
       }
-case "tier":
-      case "mytier": {
-        const mwu    = await getMWUser(sender);
-        const wallet = await getWallet(sender);
-        const t      = TIERS[mwu.tier];
-        const expiry = mwu.tierExpiry ? mwu.tierExpiry.toDateString() : "—";
+
+      case "rpgshop":
+      case "store": {
+        await doReact("🛒");
+        const list = Object.entries(rpgItems).map(([k,v]) => `▪️ *${v.name}* — $${v.cost}\n   Buy: *${prefix}rpgbuy ${k}*`).join("\n\n");
+        m.reply(`🛍️ *RPG Shop*\n\n${list}`);
+        break;
+      }
+
+      case "rpgbuy": {
+        await doReact("💰");
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+        if (!text) return m.reply(`Usage: *${prefix}rpgbuy <item>*\n\nSee items: *${prefix}rpgshop*`);
+        const selectedItem = rpgItems[text.toLowerCase().trim()];
+        if (!selectedItem) return m.reply(`❌ Invalid item! See *${prefix}rpgshop*`);
+        const ecoUser = await getEcoUser(m.sender);
+        if (!ecoUser) return m.reply("❌ Economy not available!");
+        if (ecoUser.wallet < selectedItem.cost) return m.reply(`❌ Need $${selectedItem.cost}! You have $${ecoUser.wallet}`);
+        await mongoose.models.EcoUser.findOneAndUpdate({ id: m.sender }, { wallet: ecoUser.wallet - selectedItem.cost });
+        user.inventory[selectedItem.field] += 1;
+        await user.save();
+        m.reply(`✅ Bought *${selectedItem.name}* for *$${selectedItem.cost}*!\n💰 Wallet: $${ecoUser.wallet - selectedItem.cost}`);
+        break;
+      }
+
+      case "rpginv":
+      case "rpginventory": {
+        await doReact("🎒");
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+        const inv = user.inventory;
         m.reply(
-          `🎖️ *${pushName}'s Tier*\n${"─".repeat(20)}\n` +
-          `Tier:   *${t.label}*\n` +
-          `Daily:  ×${t.dailyMult} multiplier\n` +
-          `Price:  ${t.monthlyNGN ? `₦${t.monthlyNGN}/month` : "Free"}\n` +
-          `Expiry: ${expiry}\n\n` +
-          (mwu.goldenAppleBuff   ? `🍎 Golden Apple buff: *ACTIVE* (next daily doubled)\n` : "") +
-          (mwu.goldenAppleShield ? `🛡️ Golden Apple shield: *${mwu.goldenAppleShield} turn(s)*\n` : "") +
-          `\n💰 Wallet: ${fmt(wallet)}\n` +
-          `\nType \`${prefix}mw\` to see all Money Wars commands.`
+          `[🐺 RPG INVENTORY 🐺]\n\n` +
+          `🍎 Golden Apple: ${inv.goldenApple}\n\n` +
+          `🔥 Wood: ${inv.wood}\n` +
+          `🔮 Stone: ${inv.stone}\n` +
+          `⚒️ Iron: ${inv.iron}\n` +
+          `💎 Diamonds: ${inv.diamonds}\n\n` +
+          `🔨 *TOOLS*\n` +
+          `🪓 Wooden Axe: ${inv.woodenaxe}\n` +
+          `⛏️ Stone Pickaxe: ${inv.stonepickaxe}\n` +
+          `⛏️ Iron Pickaxe: ${inv.ironpickaxe}\n` +
+          `💠 Diamond Pickaxe: ${inv.diamondpickaxe}\n\n` +
+          `Sell items: *${prefix}sellitem <item> [amount]*\n` +
+          `_e.g. ${prefix}sellitem goldenapple 1_`
         );
         break;
       }
 
-      case "richlist":
-      case "rl": {
-        const top = await EcoUser.find().sort({ bank: -1, wallet: -1 }).limit(10);
-        if (!top.length) return m.reply("📊 No players yet!");
-        const medals = ["🥇","🥈","🥉"];
-        let board = `👑 *Money Wars Rich List*\n${"═".repeat(24)}\n`;
-        for (let i = 0; i < top.length; i++) {
-          const mwu   = await MWUser.findOne({ id: top[i].id });
-          const badge = TIERS[mwu?.tier ?? "free"]?.badge || "";
-          const total = (top[i].wallet ?? 0) + (top[i].bank ?? 0);
-          const medal = medals[i] ?? `${i+1}.`;
-          const name  = top[i].id.split("@")[0];
-          board += `${medal} ${badge} ${name}\n   💰 ${fmt(total)}\n`;
+      case "mine":
+      case "hunt":
+      case "chop": {
+        await doReact("⛏️");
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
+
+        const lastUsed = cooldowns.get(m.sender);
+        if (lastUsed && Date.now() - lastUsed < COOLDOWN_TIME) {
+          const timeLeft = Math.ceil((COOLDOWN_TIME - (Date.now() - lastUsed)) / 1000);
+          return m.reply(`⏳ Wait *${timeLeft}s* before mining again.`);
         }
-        m.reply(board);
+
+        const axeUsed = args[0]?.toLowerCase();
+        if (!axeUsed) {
+          return m.reply(
+            `⛏️ *Choose a tool:*\n\n` +
+            `1. *${prefix}mine woodenaxe*\n` +
+            `2. *${prefix}mine stonepickaxe*\n` +
+            `3. *${prefix}mine ironpickaxe*\n` +
+            `4. *${prefix}mine diamondpickaxe*`
+          );
+        }
+
+        if (!lootTables[axeUsed]) return m.reply(`❌ Invalid tool! Use woodenaxe, stonepickaxe, ironpickaxe or diamondpickaxe`);
+        if (!user.inventory[axeUsed] || user.inventory[axeUsed] < 1) return m.reply(`❌ You don't have a ${axeUsed}!\nBuy one with *${prefix}rpgbuy ${axeUsed}*`);
+
+        const table = lootTables[axeUsed];
+        const loot = {
+          wood:     Math.floor(Math.random() * table.wood[1])     + table.wood[0],
+          stone:    Math.floor(Math.random() * table.stone[1])    + table.stone[0],
+          iron:     Math.floor(Math.random() * table.iron[1])     + table.iron[0],
+          diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
+        };
+
+        user.inventory.wood     += loot.wood;
+        user.inventory.stone    += loot.stone;
+        user.inventory.iron     += loot.iron;
+        user.inventory.diamonds += loot.diamonds;
+
+        let lootMsg =
+          `⛏️ *MINE RESULT*\n\nTool: ${axeUsed}\n\n` +
+          `🔥 Wood: +${loot.wood}\n` +
+          `🔮 Stone: +${loot.stone}\n` +
+          `⚒️ Iron: +${loot.iron}\n` +
+          `💎 Diamonds: +${loot.diamonds}`;
+
+        if (axeUsed === "diamondpickaxe" && Math.random() <= 0.05) {
+          user.inventory.goldenApple += 1;
+          lootMsg += `\n\n🍎 *BONUS: Found a Golden Apple!*\nSell it with *${prefix}sellitem goldenapple*`;
+        }
+
+        cooldowns.set(m.sender, Date.now());
+        await user.save();
+        m.reply(lootMsg + `\n\nSell items with *${prefix}sellitem <item>*`);
         break;
       }
 
-      case "mwapple": {
-        const mwu    = await getMWUser(sender);
-        const wallet = await getWallet(sender);
+      case "hunt2": {
+        await doReact("⚔️");
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
 
+        const axe = args[0]?.toLowerCase();
+        if (!axe || !lootTables[axe]) return m.reply(`Usage: *${prefix}hunt2 <tool>*`);
+        if (!user.inventory[axe] || user.inventory[axe] < 1) return m.reply(`❌ You don't have a ${axe}!`);
+
+        const table = lootTables[axe];
+        const loot = {
+          wood:     Math.floor(Math.random() * table.wood[1])     + table.wood[0],
+          stone:    Math.floor(Math.random() * table.stone[1])    + table.stone[0],
+          iron:     Math.floor(Math.random() * table.iron[1])     + table.iron[0],
+          diamonds: Math.floor(Math.random() * table.diamonds[1]) + table.diamonds[0],
+        };
+
+        user.inventory[axe]     -= 1;
+        user.inventory.wood     += loot.wood;
+        user.inventory.stone    += loot.stone;
+        user.inventory.iron     += loot.iron;
+        user.inventory.diamonds += loot.diamonds;
+
+        await user.save();
+        m.reply(
+          `⚔️ *HUNT RESULT*\n\nTool: ${axe} (consumed)\n\n` +
+          `🔥 Wood: +${loot.wood}\n` +
+          `🔮 Stone: +${loot.stone}\n` +
+          `⚒️ Iron: +${loot.iron}\n` +
+          `💎 Diamonds: +${loot.diamonds}`
+        );
+        break;
+      }
+
+      // ✅ FIXED sellitem — golden apple now sells correctly
+      case "sellitem":
+      case "sellinv": {
+        await doReact("💰");
         if (!text) {
+          const prices = Object.entries(rpgSellPrices)
+            .map(([k,v]) => `${k}: $${v}`)
+            .join("\n");
+          return m.reply(`💰 *RPG Sell Prices:*\n\n${prices}\n\nUsage: *${prefix}sellitem <item> [amount]*`);
+        }
+
+        const parts    = text.split(" ");
+        const itemKey  = parts[0].toLowerCase();   // e.g. "goldenapple"
+        const amount   = parseInt(parts[1]) || 1;
+
+        // ✅ FIX: check sell price using lowercase key
+        if (!rpgSellPrices[itemKey]) {
           return m.reply(
-            `🍎 *MW Golden Apple* _(not the RPG item)_\n${"─".repeat(20)}\n` +
-            `Cost:    ${fmt(GOLDEN_APPLE_PRICE)}\n` +
-            `Effects:\n` +
-            `  • Doubles your next \`${prefix}daily\` reward\n` +
-            `  • Gives 3-turn rob protection shield\n\n` +
-            (mwu.goldenAppleBuff   ? `✅ Buff: ACTIVE (daily doubled)\n` : "") +
-            (mwu.goldenAppleShield ? `🛡️ Shield: ${mwu.goldenAppleShield} turn(s) left\n` : "") +
-            `\n💰 Your wallet: ${fmt(wallet)}\n` +
-            `\nUsage: \`${prefix}mwapple buy\` to purchase & activate\n` +
-            `_RPG golden apple: \`${prefix}rpgbuy goldenapple\`_`
+            `❌ Can't sell that! Valid items:\n${Object.keys(rpgSellPrices).join(", ")}`
           );
         }
 
-        if (text.toLowerCase() === "buy") {
-          if (mwu.goldenAppleBuff || mwu.goldenAppleShield > 0)
-            return m.reply("🍎 You already have a Golden Apple buff active!");
-          if (wallet < GOLDEN_APPLE_PRICE)
-            return m.reply(`❌ Need ${fmt(GOLDEN_APPLE_PRICE)}, you have ${fmt(wallet)}.`);
+        user = await player.findOne({ id: m.sender });
+        if (!user) return m.reply(`Register first with *${prefix}register*`);
 
-          await deductWallet(sender, GOLDEN_APPLE_PRICE);
-          mwu.goldenAppleBuff   = true;
-          mwu.goldenAppleShield = 3;
-          await mwu.save();
+        // ✅ FIX: translate "goldenapple" → "goldenApple" for inventory lookup
+        const invField = inventoryFieldMap[itemKey] || itemKey;
+        const owned    = user.inventory[invField] || 0;
 
-          return m.reply(
-            `🍎 *MW Golden Apple activated!*\n` +
-            `${"─".repeat(20)}\n` +
-            `├ 💵 Cost: ${fmt(GOLDEN_APPLE_PRICE)} deducted\n` +
-            `├ ✨ Next \`${prefix}daily\` is *DOUBLED*\n` +
-            `└ 🛡️ 3-turn rob protection active\n\n` +
-            `💰 Wallet: ${fmt(wallet - GOLDEN_APPLE_PRICE)}`
+        if (owned < amount) {
+          return m.reply(`❌ You only have ${owned}x ${itemKey}!`);
+        }
+
+        const earnings = rpgSellPrices[itemKey] * amount;
+        user.inventory[invField] -= amount;
+        await user.save();
+
+        const ecoUser = await getEcoUser(m.sender);
+        if (ecoUser) {
+          await mongoose.models.EcoUser.findOneAndUpdate(
+            { id: m.sender },
+            { wallet: ecoUser.wallet + earnings }
           );
         }
 
-        m.reply(`Usage: \`${prefix}mwapple\` to check, \`${prefix}mwapple buy\` to purchase`);
-        break;
-      }
-
-      case "heist": {
-        const mwu = await getMWUser(sender);
-        if (tierLevel(mwu.tier) < tierLevel("gold"))
-          return m.reply(`🔒 *-heist* requires *🥇 Gold* tier.\nType \`${prefix}mw\` to see how to upgrade.`);
-        if (!m.isGroup)
-          return m.reply("❌ Heists can only be started in group chats!");
-
-        const groupId  = m.from;
-        const existing = await MWHeist.findOne({ groupId, active: true });
-        if (existing) return m.reply("🏦 A heist is already running! Use `-joinheist` to join.");
-
-        await MWHeist.create({ groupId, leader: sender, members: [sender], active: true });
-
         m.reply(
-          `🏦 *BANK HEIST INITIATED!*\n${"═".repeat(22)}\n` +
-          `👑 Leader: ${pushName}\n` +
-          `⏳ You have *60 seconds* to join.\n` +
-          `💰 Bank vault: $20K–$100K to split\n` +
-          `${"═".repeat(22)}\n` +
-          `Type \`${prefix}joinheist\` to join the crew!\n` +
-          `_Minimum 2 players required._`
-        );
-
-        setTimeout(() => executeHeist(groupId, Atlas, m).catch(() => {}), 60_000);
-        break;
-      }
-
-      case "joinheist": {
-        const mwu = await getMWUser(sender);
-        if (tierLevel(mwu.tier) < tierLevel("gold"))
-          return m.reply(`🔒 *-joinheist* requires *🥇 Gold* tier.`);
-        if (!m.isGroup) return m.reply("❌ Group only!");
-
-        const heist = await MWHeist.findOne({ groupId: m.from, active: true });
-        if (!heist) return m.reply("🏦 No active heist! Start one with `-heist`");
-        if (heist.members.includes(sender)) return m.reply("✅ You're already in the crew!");
-
-        heist.members.push(sender);
-        await heist.save();
-        m.reply(`🦹 *${pushName}* joined the crew! (${heist.members.length} members)`);
-        break;
-      }
-
-      case "stocks": {
-        const list = await MWStock.find();
-        if (!list.length) return m.reply("📊 Market loading... try again in a moment.");
-        let board = `📈 *Money Wars Stock Market*\n${"═".repeat(26)}\n`;
-        for (const s of list) {
-          const arrow = s.change >= 0 ? "📈" : "📉";
-          const sign  = s.change >= 0 ? "+" : "";
-          board += `*${s.symbol}* ${fmt(s.price)}  ${arrow} ${sign}${s.change}%\n  ${s.name}\n`;
-        }
-        board += `\n_Ticks every 30 min_\nBuy: \`${prefix}buystock NAIJ 5\``;
-        m.reply(board);
-        break;
-      }
-
-      case "buystock": {
-        const mwu = await getMWUser(sender);
-        if (tierLevel(mwu.tier) < tierLevel("gold"))
-          return m.reply(`🔒 *-buystock* requires *🥇 Gold* tier.`);
-
-        const [sym, qtyStr] = (text || "").split(" ");
-        const qty = parseInt(qtyStr);
-        if (!sym || !qty || qty < 1) return m.reply(`Usage: \`${prefix}buystock NAIJ 5\``);
-
-        const stock = await MWStock.findOne({ symbol: sym.toUpperCase() });
-        if (!stock) return m.reply(`❌ Unknown symbol. Check \`${prefix}stocks\``);
-
-        const cost   = stock.price * qty;
-        const wallet = await getWallet(sender);
-        if (wallet < cost) return m.reply(`❌ Need ${fmt(cost)}, you have ${fmt(wallet)}.`);
-
-        await deductWallet(sender, cost);
-
-        const port = await MWPortfolio.findOne({ id: sender, symbol: stock.symbol });
-        if (port) {
-          port.avgBuy = ((port.avgBuy * port.shares) + cost) / (port.shares + qty);
-          port.shares += qty;
-          await port.save();
-        } else {
-          await MWPortfolio.create({ id: sender, symbol: stock.symbol, shares: qty, avgBuy: stock.price });
-        }
-
-        m.reply(
-          `✅ Bought *${qty}x ${stock.symbol}* @ ${fmt(stock.price)}/share\n` +
-          `Total: ${fmt(cost)}\n💰 Wallet: ${fmt(wallet - cost)}`
-        );
-        break;
-      }
-
-      case "sellstock": {
-        const [sym, qtyStr] = (text || "").split(" ");
-        const qty = parseInt(qtyStr);
-        if (!sym || !qty || qty < 1) return m.reply(`Usage: \`${prefix}sellstock NAIJ 3\``);
-
-        const stock = await MWStock.findOne({ symbol: sym.toUpperCase() });
-        if (!stock) return m.reply(`❌ Unknown symbol. Check \`${prefix}stocks\``);
-
-        const port = await MWPortfolio.findOne({ id: sender, symbol: stock.symbol });
-        if (!port || port.shares < qty)
-          return m.reply(`❌ You don't have ${qty}x ${sym.toUpperCase()}.`);
-
-        const earned = stock.price * qty;
-        const pl     = earned - (port.avgBuy * qty);
-        const plSign = pl >= 0 ? "+" : "";
-
-        await addWallet(sender, earned);
-        port.shares -= qty;
-        if (port.shares <= 0) await port.deleteOne();
-        else await port.save();
-
-        const mwu = await getMWUser(sender);
-        mwu.seasonEarned += Math.max(0, pl);
-        await mwu.save();
-
-        m.reply(
-          `💹 Sold *${qty}x ${stock.symbol}* @ ${fmt(stock.price)}/share\n` +
-          `├ Earned: ${fmt(earned)}\n` +
-          `├ P/L: ${plSign}${fmt(pl)}\n` +
-          `└ 💰 Wallet: ${fmt(await getWallet(sender))}`
-        );
-        break;
-  }
-
-      case "portfolio": {
-        const holdings = await MWPortfolio.find({ id: sender });
-        if (!holdings.length) return m.reply(`📊 No stocks yet. Check \`${prefix}stocks\` to invest!`);
-        let total = 0;
-        let board = `📊 *${pushName}'s Portfolio*\n${"─".repeat(22)}\n`;
-        for (const h of holdings) {
-          const stock = await MWStock.findOne({ symbol: h.symbol });
-          if (!stock) continue;
-          const value = stock.price * h.shares;
-          const pl    = value - (h.avgBuy * h.shares);
-          total += value;
-          board += `*${h.symbol}* ×${h.shares}  ${fmt(value)}  P/L: ${pl>=0?"+":""}${fmt(pl)}\n`;
-        }
-        board += `\n💼 Portfolio value: *${fmt(total)}*`;
-        m.reply(board);
-        break;
-      }
-
-      case "setpremium": {
-        if (!isCreator) return m.reply("❌ Owner only.");
-        const target = mentionByTag?.[0] || m.quoted?.sender;
-        const tier   = args[0]?.toLowerCase();
-        const days   = parseInt(args[1]) || 30;
-
-        if (!target || !tier) return m.reply(`Usage: \`${prefix}setpremium @user silver 30\``);
-        if (!TIERS[tier])     return m.reply("Valid tiers: free, silver, gold, diamond");
-
-        const mwTarget = await getMWUser(target);
-        const wasNew   = mwTarget.tier === "free";
-        const bonus    = (wasNew && tier !== "free") ? TIERS[tier].startBonus : 0;
-
-        mwTarget.tier       = tier;
-        mwTarget.tierExpiry = tier === "free" ? null : new Date(Date.now() + days * 86_400_000);
-        await mwTarget.save();
-
-        if (bonus > 0) await addWallet(target, bonus);
-
-        await Atlas.sendMessage(m.from, {
-          text:
-            `✅ *@${target.split("@")[0]}* upgraded to *${TIERS[tier].label}*!\n` +
-            `├ 🎁 Start bonus: +${fmt(bonus)}\n` +
-            `└ ⏳ Expires: ${mwTarget.tierExpiry?.toDateString() ?? "Never"}`,
-          mentions: [target],
-        }, { quoted: m });
-        break;
-      }
-
-      case "resetseason": {
-        if (!isCreator) return m.reply("❌ Owner only.");
-
-        const top    = await EcoUser.find().sort({ bank: -1, wallet: -1 }).limit(1);
-        const winner = top[0];
-
-        await EcoUser.updateMany({}, {
-          $set: {
-            wallet: 0, bank: 1000, bankCapacity: 50000, streak: 0,
-            lastDaily: null, lastFish: null, lastDig: null,
-            lastBeg: null, lastWork: null, inventory: {}
-          }
-        });
-
-        await MWUser.updateMany({}, {
-          $set: { goldenAppleBuff: false, goldenAppleShield: 0, seasonEarned: 0 }
-        });
-
-        await MWPortfolio.deleteMany({});
-
-        const winnerName = winner ? winner.id.split("@")[0] : "Nobody";
-        const winnerAmt  = winner ? (winner.wallet + winner.bank) : 0;
-
-        m.reply(
-          `🏆 *SEASON RESET!*\n${"═".repeat(24)}\n` +
-          `👑 Champion: *${winnerName}*\n` +
-          `💰 Final balance: ${fmt(winnerAmt)}\n` +
-          `${"═".repeat(24)}\n` +
-          `Everyone starts fresh!\n` +
-          `_Contact the winner to send their prize._`
+          `✅ Sold *${amount}x ${itemKey}* for *$${earnings}*!\n` +
+          `💰 Wallet: $${ecoUser ? ecoUser.wallet + earnings : "N/A"}`
         );
         break;
       }
