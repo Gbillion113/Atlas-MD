@@ -4,89 +4,63 @@
  * ║  Adds: tiers · golden apple · heist · stocks · premium  ║
  * ╠══════════════════════════════════════════════════════════╣
  * ║  SAFE TO USE ALONGSIDE economy.js — no command clashes  ║
- * ║  Uses the SAME EcoUser model (extended via patch)        ║
  * ╚══════════════════════════════════════════════════════════╝
- *
- * HOW TO INSTALL:
- * 1. Save this file as Plugins/moneywars.js
- * 2. Paste the schema patch block below into economy.js
- *    (instructions at the bottom of this file)
- * 3. Restart the bot
- *
- * NEW COMMANDS (none clash with economy.js):
- *   -mw          → Money Wars info / help
- *   -tier        → View your tier & benefits
- *   -richlist    → Premium leaderboard with tier badges
- *   -setpremium  → [Owner] Set a player's tier
- *   -resetseason → [Owner] End season, crown winner
- *   -golden      → Buy/use a Golden Apple
- *   -heist       → Start a group bank heist (Gold+)
- *   -joinheist   → Join an active heist (Gold+)
- *   -stocks      → View the stock market
- *   -buystock    → Buy shares (Gold+)
- *   -sellstock   → Sell shares (Gold+)
- *   -portfolio   → View your stock holdings
  */
 
 import mongoose from "mongoose";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// REUSE THE EXISTING EcoUser MODEL
-// We retrieve it instead of redefining it, then patch in extra fields
-// via a separate MWUser model that links by the same `id`.
-// This avoids ANY schema conflict with economy.js.
-// ─────────────────────────────────────────────────────────────────────────────
+const EcoUserSchema = new mongoose.Schema({
+  id:           { type: String, required: true, unique: true },
+  wallet:       { type: Number, default: 0 },
+  bank:         { type: Number, default: 1000 },
+  bankCapacity: { type: Number, default: 50000 },
+  lastDaily:    { type: Date,   default: null },
+  lastFish:     { type: Date,   default: null },
+  lastDig:      { type: Date,   default: null },
+  lastBeg:      { type: Date,   default: null },
+  lastWork:     { type: Date,   default: null },
+  streak:       { type: Number, default: 0 },
+  inventory:    { type: Object, default: {} },
+});
+const EcoUser = mongoose.models.EcoUser || mongoose.model("EcoUser", EcoUserSchema);
 
-// The existing EcoUser (from economy.js) — we retrieve it, never redefine
-const EcoUser = mongoose.models.EcoUser;
-
-// Extra Money Wars data — stored in a separate collection to avoid touching
-// the existing schema at all. Links via the same `id` string.
 const MWUserSchema = new mongoose.Schema({
-  id: { type: String, unique: true },      // same id as EcoUser
-  tier: { type: String, default: "free" }, // free | silver | gold | diamond
-  tierExpiry: { type: Date, default: null },
-
-  // Golden Apple
-  goldenAppleBuff: { type: Boolean, default: false }, // doubles next -daily
-  goldenAppleShield: { type: Number, default: 0 },    // rob protection turns
-
-  // Streak (we store separately so we don't touch economy.js streak logic)
-  seasonEarned: { type: Number, default: 0 },         // for season reset ranking
+  id:                { type: String, unique: true },
+  tier:              { type: String,  default: "free"  },
+  tierExpiry:        { type: Date,    default: null     },
+  goldenAppleBuff:   { type: Boolean, default: false    },
+  goldenAppleShield: { type: Number,  default: 0        },
+  seasonEarned:      { type: Number,  default: 0        },
 });
 
 const HeistSchema = new mongoose.Schema({
-  groupId: { type: String, unique: true },
-  leader: String,
-  members: [String],
+  groupId:   { type: String, unique: true },
+  leader:    String,
+  members:   [String],
   startTime: { type: Number, default: () => Date.now() },
-  active: { type: Boolean, default: false },
+  active:    { type: Boolean, default: false },
 });
 
 const StockSchema = new mongoose.Schema({
-  symbol: { type: String, unique: true },
-  name: String,
-  price: Number,
-  change: { type: Number, default: 0 },
-  history: [Number],
+  symbol:     { type: String, unique: true },
+  name:       String,
+  price:      Number,
+  change:     { type: Number, default: 0 },
+  history:    [Number],
   lastUpdate: Number,
 });
 
 const PortfolioSchema = new mongoose.Schema({
-  id: String,        // player id
+  id:     String,
   symbol: String,
   shares: { type: Number, default: 0 },
   avgBuy: { type: Number, default: 0 },
 });
 
-const MWUser    = mongoose.models.MWUser    || mongoose.model("MWUser",    MWUserSchema);
-const MWHeist   = mongoose.models.MWHeist   || mongoose.model("MWHeist",   HeistSchema);
-const MWStock   = mongoose.models.MWStock   || mongoose.model("MWStock",   StockSchema);
+const MWUser      = mongoose.models.MWUser      || mongoose.model("MWUser",      MWUserSchema);
+const MWHeist     = mongoose.models.MWHeist     || mongoose.model("MWHeist",     HeistSchema);
+const MWStock     = mongoose.models.MWStock     || mongoose.model("MWStock",     StockSchema);
 const MWPortfolio = mongoose.models.MWPortfolio || mongoose.model("MWPortfolio", PortfolioSchema);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
 
 const TIERS = {
   free:    { label: "🥉 Free",    badge: "",    dailyMult: 1, startBonus: 0,       monthlyNGN: 0     },
@@ -95,18 +69,8 @@ const TIERS = {
   diamond: { label: "💎 Diamond", badge: "💎",  dailyMult: 3, startBonus: 200_000, monthlyNGN: 2_500 },
 };
 
-// Commands locked behind tiers
-const TIER_GATES = {
-  heist:     "gold",
-  joinheist: "gold",
-  buystock:  "gold",
-  sellstock: "gold",
-};
-
-// GOLDEN APPLE price (taken from wallet, consistent with economy.js prices)
 const GOLDEN_APPLE_PRICE = 5_000;
 
-// Stocks seeded once
 const INITIAL_STOCKS = [
   { symbol: "NAIJ", name: "NaijaBank Corp",    price: 1_200 },
   { symbol: "KRYP", name: "KryptoCoin Ltd",     price: 8_500 },
@@ -115,11 +79,7 @@ const INITIAL_STOCKS = [
   { symbol: "FUEL", name: "PetroNG Resources",  price: 920   },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-const fmt  = (n) => {
+const fmt = (n) => {
   if (n >= 1e9) return `$${(n/1e9).toFixed(1)}B`;
   if (n >= 1e6) return `$${(n/1e6).toFixed(1)}M`;
   if (n >= 1e3) return `$${(n/1e3).toFixed(1)}K`;
@@ -127,13 +87,11 @@ const fmt  = (n) => {
 };
 
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-
 const tierLevel = (t) => ["free","silver","gold","diamond"].indexOf(t ?? "free");
 
 async function getMWUser(id) {
   let u = await MWUser.findOne({ id });
   if (!u) u = await MWUser.create({ id });
-  // Expire tier if needed
   if (u.tier !== "free" && u.tierExpiry && new Date() > u.tierExpiry) {
     u.tier = "free";
     u.tierExpiry = null;
@@ -142,27 +100,18 @@ async function getMWUser(id) {
   return u;
 }
 
-// Get wallet from existing EcoUser (read-only peek)
 async function getWallet(id) {
-  if (!EcoUser) return 0;
   const eco = await EcoUser.findOne({ id });
   return eco?.wallet ?? 0;
 }
 
-// Deduct from wallet — writes to the existing EcoUser
 async function deductWallet(id, amount) {
-  if (!EcoUser) return;
   await EcoUser.findOneAndUpdate({ id }, { $inc: { wallet: -amount } });
 }
 
 async function addWallet(id, amount) {
-  if (!EcoUser) return;
   await EcoUser.findOneAndUpdate({ id }, { $inc: { wallet: amount } });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STOCK MARKET SETUP
-// ─────────────────────────────────────────────────────────────────────────────
 
 async function seedStocks() {
   for (const s of INITIAL_STOCKS) {
@@ -176,9 +125,9 @@ async function tickStocks() {
   for (const stock of await MWStock.find()) {
     const pct      = parseFloat((Math.random() * 20 - 10).toFixed(2));
     const newPrice = Math.max(10, Math.round(stock.price * (1 + pct / 100)));
-    stock.change   = pct;
-    stock.price    = newPrice;
-    stock.history  = [...stock.history.slice(-9), newPrice];
+    stock.change     = pct;
+    stock.price      = newPrice;
+    stock.history    = [...stock.history.slice(-9), newPrice];
     stock.lastUpdate = Date.now();
     await stock.save();
   }
@@ -186,10 +135,6 @@ async function tickStocks() {
 
 seedStocks().catch(() => {});
 setInterval(() => tickStocks().catch(() => {}), 30 * 60 * 1000);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HEIST EXECUTION
-// ─────────────────────────────────────────────────────────────────────────────
 
 async function executeHeist(groupId, Atlas, m) {
   const heist = await MWHeist.findOne({ groupId, active: true });
@@ -199,7 +144,7 @@ async function executeHeist(groupId, Atlas, m) {
 
   if (heist.members.length < 2) {
     return Atlas.sendMessage(m.from, {
-      text: "🏦 *Heist cancelled!* Need at least 2 crew members. Vault Keys not refunded (lesson learned 😅)"
+      text: "🏦 *Heist cancelled!* Need at least 2 crew members."
     });
   }
 
@@ -213,8 +158,8 @@ async function executeHeist(groupId, Atlas, m) {
     return Atlas.sendMessage(m.from, {
       text:
         `🚔 *HEIST BUSTED!*\n` +
-        `The cops were waiting... everyone pays *${fmt(fine)}* in fines.\n` +
-        `Crew: ${heist.members.length} people. Better plan next time! 😭`
+        `Everyone pays *${fmt(fine)}* in fines.\n` +
+        `Better plan next time! 😭`
     });
   }
 
@@ -238,95 +183,42 @@ async function executeHeist(groupId, Atlas, m) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MONEY WARS: ROB HOOK
-// Call this from inside economy.js's "rob" case BEFORE the rob logic runs.
-// Returns true if the robbery should be blocked (Golden Apple shield).
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function checkGoldenAppleShield(targetId, attackerId, Atlas, m) {
-  const mwTarget = await MWUser.findOne({ id: targetId });
-  if (!mwTarget || mwTarget.goldenAppleShield <= 0) return false;
-
-  mwTarget.goldenAppleShield--;
-  await mwTarget.save();
-
-  await Atlas.sendMessage(m.from, {
-    text:
-      `🍎 *Robbery blocked!*\n` +
-      `@${targetId.split("@")[0]} had a *Golden Apple shield*!\n` +
-      `Shields remaining: ${mwTarget.goldenAppleShield}`,
-    mentions: [attackerId, targetId],
-  }, { quoted: m });
-
-  return true; // tell economy.js to stop the rob
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MONEY WARS: DAILY HOOK
-// Call this from inside economy.js's "daily" case to apply the multiplier.
-// Returns the final amount after tier + golden apple adjustments.
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function applyDailyBonus(id, baseAmount) {
-  const mwu  = await getMWUser(id);
-  const mult = TIERS[mwu.tier]?.dailyMult ?? 1;
-  let   result = baseAmount * mult;
-
-  let appleNote = "";
-  if (mwu.goldenAppleBuff) {
-    result *= 2;
-    mwu.goldenAppleBuff = false;
-    await mwu.save();
-    appleNote = "\n🍎 *Golden Apple doubled your daily!*";
-  }
-
-  // Track season earnings
-  mwu.seasonEarned += result - baseAmount; // track the bonus portion
-  await mwu.save();
-
-  return { amount: Math.floor(result), appleNote, mult, tier: mwu.tier };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PLUGIN EXPORT
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default {
   name: "moneywars",
   alias: [
     "mw", "tier", "mytier", "richlist", "rl",
     "setpremium", "resetseason",
-    "golden", "useapple",
+    "mwapple",
     "heist", "joinheist",
     "stocks", "buystock", "sellstock", "portfolio",
   ],
   uniquecommands: [
     "mw", "tier", "richlist",
     "setpremium", "resetseason",
-    "golden", "useapple",
+    "mwapple",
     "heist", "joinheist",
     "stocks", "buystock", "sellstock", "portfolio",
   ],
   description: "💰 Money Wars — Tiers, Heist, Stocks & Golden Apple",
 
-  start: async (Atlas, m, { prefix, inputCMD, text, args, mentionByTag, pushName, isOwner }) => {
+  // ✅ pushname (lowercase n) matches Core.js exactly
+  // ✅ isCreator matches Core.js exactly
+  start: async (Atlas, m, { prefix, inputCMD, text, args, mentionByTag, pushname, isCreator }) => {
     const sender = m.sender;
 
     switch (inputCMD) {
 
-      // ── HELP / INFO ─────────────────────────────────────────────────────
       case "mw": {
         await m.reply(
           `💰 *MONEY WARS*\n${"═".repeat(24)}\n\n` +
           `🥉 *Free*   → play & earn for free\n` +
-          `🥈 *Silver* → ₦500/mo — work, gamble bonuses\n` +
-          `🥇 *Gold*   → ₦1,000/mo — rob, heist, stocks\n` +
+          `🥈 *Silver* → ₦500/mo — ×1 daily\n` +
+          `🥇 *Gold*   → ₦1,000/mo — ×2 daily, rob, heist, stocks\n` +
           `💎 *Diamond*→ ₦2,500/mo — ×3 daily, exclusive board\n\n` +
           `*Commands:*\n` +
           `▪️ \`${prefix}tier\` — your tier & benefits\n` +
           `▪️ \`${prefix}richlist\` — top players with badges\n` +
-          `▪️ \`${prefix}golden\` — buy & use Golden Apple\n` +
+          `▪️ \`${prefix}mwapple\` — buy MW Golden Apple buff\n` +
           `▪️ \`${prefix}heist\` — group bank heist (Gold+)\n` +
           `▪️ \`${prefix}stocks\` — stock market\n` +
           `▪️ \`${prefix}buystock <SYM> <qty>\` — buy shares\n` +
@@ -337,7 +229,6 @@ export default {
         break;
       }
 
-      // ── TIER INFO ───────────────────────────────────────────────────────
       case "tier":
       case "mytier": {
         const mwu    = await getMWUser(sender);
@@ -345,49 +236,44 @@ export default {
         const t      = TIERS[mwu.tier];
         const expiry = mwu.tierExpiry ? mwu.tierExpiry.toDateString() : "—";
         m.reply(
-          `🎖️ *${pushName}'s Tier*\n${"─".repeat(20)}\n` +
+          `🎖️ *${pushname}'s Tier*\n${"─".repeat(20)}\n` +
           `Tier:   *${t.label}*\n` +
           `Daily:  ×${t.dailyMult} multiplier\n` +
-          `Bonus:  ${t.monthlyNGN ? `₦${t.monthlyNGN}/month` : "Free"}\n` +
+          `Price:  ${t.monthlyNGN ? `₦${t.monthlyNGN}/month` : "Free"}\n` +
           `Expiry: ${expiry}\n\n` +
-          (mwu.goldenAppleBuff    ? `🍎 Golden Apple buff: *ACTIVE* (next daily doubled)\n` : "") +
-          (mwu.goldenAppleShield  ? `🛡️ Golden Apple shield: *${mwu.goldenAppleShield} turn(s)*\n` : "") +
+          (mwu.goldenAppleBuff   ? `🍎 Golden Apple buff: *ACTIVE* (next daily doubled)\n` : "") +
+          (mwu.goldenAppleShield ? `🛡️ Golden Apple shield: *${mwu.goldenAppleShield} turn(s)*\n` : "") +
           `\n💰 Wallet: ${fmt(wallet)}\n` +
           `\nType \`${prefix}mw\` to see all Money Wars commands.`
         );
         break;
       }
 
-      // ── RICH LIST (with tier badges) ────────────────────────────────────
       case "richlist":
       case "rl": {
-        if (!EcoUser) return m.reply("❌ Economy system not loaded yet.");
         const top = await EcoUser.find().sort({ bank: -1, wallet: -1 }).limit(10);
         if (!top.length) return m.reply("📊 No players yet!");
         const medals = ["🥇","🥈","🥉"];
         let board = `👑 *Money Wars Rich List*\n${"═".repeat(24)}\n`;
         for (let i = 0; i < top.length; i++) {
-          const mwu    = await MWUser.findOne({ id: top[i].id });
-          const badge  = TIERS[mwu?.tier ?? "free"]?.badge || "";
-          const total  = (top[i].wallet ?? 0) + (top[i].bank ?? 0);
-          const medal  = medals[i] ?? `${i+1}.`;
-          const name   = top[i].id.split("@")[0];
+          const mwu   = await MWUser.findOne({ id: top[i].id });
+          const badge = TIERS[mwu?.tier ?? "free"]?.badge || "";
+          const total = (top[i].wallet ?? 0) + (top[i].bank ?? 0);
+          const medal = medals[i] ?? `${i+1}.`;
+          const name  = top[i].id.split("@")[0];
           board += `${medal} ${badge} ${name}\n   💰 ${fmt(total)}\n`;
         }
         m.reply(board);
         break;
       }
 
-      // ── GOLDEN APPLE ────────────────────────────────────────────────────
-      case "golden":
-      case "useapple": {
+      case "mwapple": {
         const mwu    = await getMWUser(sender);
         const wallet = await getWallet(sender);
 
-        // No arg = show status + buy option
         if (!text) {
           return m.reply(
-            `🍎 *Golden Apple*\n${"─".repeat(20)}\n` +
+            `🍎 *MW Golden Apple* _(not the RPG item)_\n${"─".repeat(20)}\n` +
             `Cost:    ${fmt(GOLDEN_APPLE_PRICE)}\n` +
             `Effects:\n` +
             `  • Doubles your next \`${prefix}daily\` reward\n` +
@@ -395,7 +281,8 @@ export default {
             (mwu.goldenAppleBuff   ? `✅ Buff: ACTIVE (daily doubled)\n` : "") +
             (mwu.goldenAppleShield ? `🛡️ Shield: ${mwu.goldenAppleShield} turn(s) left\n` : "") +
             `\n💰 Your wallet: ${fmt(wallet)}\n` +
-            `\nUsage: \`${prefix}golden buy\` to purchase & activate`
+            `\nUsage: \`${prefix}mwapple buy\` to purchase & activate\n` +
+            `_RPG golden apple: \`${prefix}rpgbuy goldenapple\`_`
           );
         }
 
@@ -406,12 +293,12 @@ export default {
             return m.reply(`❌ Need ${fmt(GOLDEN_APPLE_PRICE)}, you have ${fmt(wallet)}.`);
 
           await deductWallet(sender, GOLDEN_APPLE_PRICE);
-          mwu.goldenAppleBuff    = true;
-          mwu.goldenAppleShield  = 3;
+          mwu.goldenAppleBuff   = true;
+          mwu.goldenAppleShield = 3;
           await mwu.save();
 
           return m.reply(
-            `🍎 *Golden Apple activated!*\n` +
+            `🍎 *MW Golden Apple activated!*\n` +
             `${"─".repeat(20)}\n` +
             `├ 💵 Cost: ${fmt(GOLDEN_APPLE_PRICE)} deducted\n` +
             `├ ✨ Next \`${prefix}daily\` is *DOUBLED*\n` +
@@ -420,11 +307,10 @@ export default {
           );
         }
 
-        m.reply(`Usage: \`${prefix}golden\` to check, \`${prefix}golden buy\` to purchase`);
+        m.reply(`Usage: \`${prefix}mwapple\` to check, \`${prefix}mwapple buy\` to purchase`);
         break;
       }
 
-      // ── HEIST ───────────────────────────────────────────────────────────
       case "heist": {
         const mwu = await getMWUser(sender);
         if (tierLevel(mwu.tier) < tierLevel("gold"))
@@ -440,7 +326,7 @@ export default {
 
         m.reply(
           `🏦 *BANK HEIST INITIATED!*\n${"═".repeat(22)}\n` +
-          `👑 Leader: ${pushName}\n` +
+          `👑 Leader: ${pushname}\n` +
           `⏳ You have *60 seconds* to join.\n` +
           `💰 Bank vault: $20K–$100K to split\n` +
           `${"═".repeat(22)}\n` +
@@ -464,11 +350,10 @@ export default {
 
         heist.members.push(sender);
         await heist.save();
-        m.reply(`🦹 *${pushName}* joined the crew! (${heist.members.length} members)`);
+        m.reply(`🦹 *${pushname}* joined the crew! (${heist.members.length} members)`);
         break;
       }
 
-      // ── STOCK MARKET ────────────────────────────────────────────────────
       case "stocks": {
         const list = await MWStock.find();
         if (!list.length) return m.reply("📊 Market loading... try again in a moment.");
@@ -529,9 +414,9 @@ export default {
         if (!port || port.shares < qty)
           return m.reply(`❌ You don't have ${qty}x ${sym.toUpperCase()}.`);
 
-        const earned   = stock.price * qty;
-        const pl       = earned - (port.avgBuy * qty);
-        const plSign   = pl >= 0 ? "+" : "";
+        const earned = stock.price * qty;
+        const pl     = earned - (port.avgBuy * qty);
+        const plSign = pl >= 0 ? "+" : "";
 
         await addWallet(sender, earned);
         port.shares -= qty;
@@ -555,7 +440,7 @@ export default {
         const holdings = await MWPortfolio.find({ id: sender });
         if (!holdings.length) return m.reply(`📊 No stocks yet. Check \`${prefix}stocks\` to invest!`);
         let total = 0;
-        let board = `📊 *${pushName}'s Portfolio*\n${"─".repeat(22)}\n`;
+        let board = `📊 *${pushname}'s Portfolio*\n${"─".repeat(22)}\n`;
         for (const h of holdings) {
           const stock = await MWStock.findOne({ symbol: h.symbol });
           if (!stock) continue;
@@ -569,15 +454,15 @@ export default {
         break;
       }
 
-      // ── OWNER COMMANDS ──────────────────────────────────────────────────
       case "setpremium": {
-        if (!isOwner) return m.reply("❌ Owner only.");
+        if (!isCreator) return m.reply("❌ Owner only.");
+        // ✅ FIX: args[0] is the @mention tag, args[1] is tier, args[2] is days
         const target = mentionByTag?.[0] || m.quoted?.sender;
-        const tier   = args[0]?.toLowerCase();  // args after mention
-        const days   = parseInt(args[1]) || 30;
+        const tier   = args[1]?.toLowerCase();
+        const days   = parseInt(args[2]) || 30;
 
-        if (!target || !tier) return m.reply(`Usage: \`${prefix}setpremium @user silver 30\``);
-        if (!TIERS[tier])     return m.reply("Valid tiers: free, silver, gold, diamond");
+        if (!target) return m.reply(`Usage: \`${prefix}setpremium @user silver 30\``);
+        if (!tier || !TIERS[tier]) return m.reply("Valid tiers: free, silver, gold, diamond");
 
         const mwTarget = await getMWUser(target);
         const wasNew   = mwTarget.tier === "free";
@@ -600,26 +485,23 @@ export default {
       }
 
       case "resetseason": {
-        if (!isOwner) return m.reply("❌ Owner only.");
-        if (!EcoUser) return m.reply("❌ EcoUser not loaded.");
+        if (!isCreator) return m.reply("❌ Owner only.");
 
-        // Find the richest player
         const top    = await EcoUser.find().sort({ bank: -1, wallet: -1 }).limit(1);
         const winner = top[0];
 
-        // Reset all economy balances
         await EcoUser.updateMany({}, {
-          $set: { wallet: 0, bank: 1000, bankCapacity: 50000, streak: 0,
-                  lastDaily: null, lastFish: null, lastDig: null,
-                  lastBeg: null, lastWork: null, inventory: {} }
+          $set: {
+            wallet: 0, bank: 1000, bankCapacity: 50000, streak: 0,
+            lastDaily: null, lastFish: null, lastDig: null,
+            lastBeg: null, lastWork: null, inventory: {}
+          }
         });
 
-        // Reset MW season data (keep tiers)
         await MWUser.updateMany({}, {
           $set: { goldenAppleBuff: false, goldenAppleShield: 0, seasonEarned: 0 }
         });
 
-        // Clear all stock portfolios
         await MWPortfolio.deleteMany({});
 
         const winnerName = winner ? winner.id.split("@")[0] : "Nobody";
@@ -641,39 +523,3 @@ export default {
     }
   },
 };
-
-/*
- * ═══════════════════════════════════════════════════════════════════
- * OPTIONAL: HOOK ECONOMY.JS FOR GOLDEN APPLE DAILY BONUS & ROB BLOCK
- * ═══════════════════════════════════════════════════════════════════
- *
- * To make the Golden Apple buff actually double the -daily reward,
- * add these two small patches to economy.js:
- *
- * ── 1. At the TOP of economy.js, import the hooks: ──────────────
- *
- *   import { applyDailyBonus, checkGoldenAppleShield } from "./moneywars.js";
- *
- * ── 2. In the "daily" case, REPLACE the final block: ────────────
- *
- *   // BEFORE (original):
- *   const amount = 1000 + bonus;
- *   await User.findOneAndUpdate({ id: sender }, { wallet: user.wallet + amount, lastDaily: now, streak });
- *   m.reply(`🎉 *Daily Claimed!*\n\n💰 +$${formatNum(amount)}\n🔥 Streak: ${streak} day(s)\n⭐ Streak Bonus: +$${bonus}`);
- *
- *   // AFTER (with Money Wars tier bonus + Golden Apple):
- *   const baseAmount = 1000 + bonus;
- *   const { amount, appleNote, mult, tier } = await applyDailyBonus(sender, baseAmount);
- *   await User.findOneAndUpdate({ id: sender }, { wallet: user.wallet + amount, lastDaily: now, streak });
- *   m.reply(`🎉 *Daily Claimed!*\n\n💰 +$${formatNum(amount)}\n🔥 Streak: ${streak} day(s)\n⭐ Streak Bonus: +$${bonus}${mult > 1 ? `\n🎖️ Tier multiplier: ×${mult}` : ""}${appleNote}`);
- *
- * ── 3. In the "rob" case, ADD this at the very start: ───────────
- *
- *   const blocked = await checkGoldenAppleShield(target, sender, Atlas, m);
- *   if (blocked) break;
- *
- *   // (paste this BEFORE the line: const hasShield = targetUser.inventory?.shield > 0;)
- *
- * That's it! The Golden Apple system now works across both files.
- * ═══════════════════════════════════════════════════════════════════
- */ 
